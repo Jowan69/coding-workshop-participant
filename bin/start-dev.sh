@@ -329,17 +329,30 @@ fi
 
 # Install pip requirements into each Python service directory for hot-reload
 # Skip if requirements.txt hasn't changed since last install (avoids slow PyPI lookups)
+# tracker runs on the python3.13 Lambda runtime: install it with python3.13 and only skip it
+# while its deps import from the service directory alone (-I -S: no site-packages), as in
+# the Lambda; psycopg must load its bundled binary build because the image has no libpq.
+verify_tracker_deps() {
+    python3.13 -I -S -B -c "import sys; sys.path.insert(0, sys.argv[1]); import psycopg, jwt; assert psycopg.pq.__impl__ == 'binary', 'psycopg binary build not loaded'" "$1"
+}
 shopt -s nullglob
 for req in "$PROJECT_ROOT"/backend/*/requirements.txt; do
     svc_dir="$(dirname "$req")"
     REQS_HASH=$(md5sum "$req" 2>/dev/null | cut -d' ' -f1)
     HASH_FILE="$svc_dir/.pip_installed"
-    if [ "$(cat "$HASH_FILE" 2>/dev/null)" = "$REQS_HASH" ]; then
+    if [ "$(cat "$HASH_FILE" 2>/dev/null)" = "$REQS_HASH" ] &&
+        { [ "$(basename "$svc_dir")" != "tracker" ] || verify_tracker_deps "$svc_dir" > /dev/null 2>&1; }; then
         echo -e "  pip requirements for $(basename "$svc_dir") already up to date, skipping..."
         continue
     fi
+    rm -f "$HASH_FILE"
     echo -e "  Installing pip requirements for $(basename "$svc_dir")..."
-    pip install --quiet --target="$svc_dir" -r "$req" 2>/dev/null || true
+    if [ "$(basename "$svc_dir")" = "tracker" ]; then
+        python3.13 -m pip install --quiet --upgrade --target="$svc_dir" -r "$req" || { echo -e "  ✗ pip install failed for tracker"; exit 1; }
+        verify_tracker_deps "$svc_dir" || { echo -e "  ✗ pip requirements for tracker installed but cannot be imported"; exit 1; }
+    else
+        pip install --quiet --target="$svc_dir" -r "$req" || { echo -e "  ✗ pip install failed for $(basename "$svc_dir")"; exit 1; }
+    fi
     echo "$REQS_HASH" > "$HASH_FILE"
 done
 

@@ -83,3 +83,11 @@ variable "aws_eks_type" {
     error_message = "The aws_eks_type variable must be either 'ON_DEMAND' or 'SPOT'."
   }
 }
+
+# Password for the seeded demo users, exposed to Lambda as SEED_PASSWORD
+variable "demo_password" {
+  description = "Password given to the seeded demo users of the tracker API."
+  type        = string
+  sensitive   = true
+  default     = "AcmeDemo-2026"
+}

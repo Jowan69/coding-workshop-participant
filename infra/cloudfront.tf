@@ -39,12 +39,7 @@ resource "aws_cloudfront_distribution" "this" {
     }
   }
 
-  custom_error_response {
-    error_code            = 404
-    error_caching_min_ttl = 300
-    response_code         = 200
-    response_page_path    = "/index.html"
-  }
+  # No custom_error_response: it applied to /api/* too, turning API 404s into index.html (frontend uses HashRouter)
 
   # logging_config {
   #   include_cookies = false

@@ -8,7 +8,7 @@ module "lambda" {
   architectures   = [each.value.arch]
   handler         = each.value.handler
   runtime         = each.value.runtime
-  memory_size     = 128
+  memory_size     = 512 # scrypt hashing and psycopg need more than 128 MB
   timeout         = 300
   tracing_mode    = "PassThrough"
   build_in_docker = false
@@ -50,9 +50,10 @@ module "lambda" {
     max_age           = 0
   }
 
+  # nonsensitive() only in the filter, so secret values stay sensitive but the keys do not
   environment_variables = {
     for key, value in local.env_vars :
-    key => trimspace(value) if try(trimspace(value), "") != ""
+    key => trimspace(value) if try(trimspace(nonsensitive(value)), "") != ""
   }
 
   tags = local.app_tags

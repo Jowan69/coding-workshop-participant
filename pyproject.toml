@@ -1,0 +1,26 @@
+# Tool settings for the tracker backend (ruff, pytest, coverage). Not a package.
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+# Explicit, because start-dev.sh vendors psycopg and jwt into backend/tracker/
+[tool.ruff.lint.isort]
+known-first-party = ["acme", "function", "conftest"]
+known-third-party = ["psycopg", "jwt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/backend"]
+markers = ["no_rollback: run outside the per-test rollback transaction"]
+
+[tool.coverage.run]
+branch = true
+include = ["backend/tracker/acme/*", "backend/tracker/function.py"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+skip_covered = true

@@ -1,0 +1,7 @@
+# Backend dev tools for ./bin/test-backend.sh, plus the Lambda's runtime pins
+-r backend/tracker/requirements.txt
+pytest==9.2.0
+pytest-cov==7.1.0
+coverage==7.16.2
+bandit==1.9.4
+ruff==0.17.4

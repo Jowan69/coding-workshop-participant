@@ -256,3 +256,19 @@ tfplan
 
 # Snyk Security Extension - AI Rules (auto-generated)
 .github/instructions/snyk_rules.instructions.md
+
+# Tracker Lambda: start-dev.sh pip-installs packages here; track only our code
+backend/tracker/*
+!backend/tracker/function.py
+!backend/tracker/requirements.txt
+!backend/tracker/acme/
+
+# Python generated files and test artifacts
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+frontend/dist/

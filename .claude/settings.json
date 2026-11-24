@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(./bin/deploy-backend.sh *)",
+      "Bash(./bin/deploy-frontend.sh *)",
+      "Bash(./bin/cleanup-environment.sh *)",
+      "Bash(terraform apply *)",
+      "Bash(terraform destroy *)"
+    ]
+  }
+}
