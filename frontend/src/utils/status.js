@@ -1,6 +1,8 @@
 import BlockIcon from '@mui/icons-material/Block';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import EventIcon from '@mui/icons-material/Event';
+import EventBusyIcon from '@mui/icons-material/EventBusy';
+import HourglassBottomIcon from '@mui/icons-material/HourglassBottom';
 import MoneyOffIcon from '@mui/icons-material/MoneyOff';
 import PauseCircleIcon from '@mui/icons-material/PauseCircle';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
@@ -35,6 +37,17 @@ export const STATUS_META = {
   over_allocated: { label: 'Over-allocated', color: 'atRisk', icon: WarningAmberIcon },
   user_active: { label: 'Active', color: 'onTrack', icon: CheckCircleIcon },
   inactive: { label: 'Inactive', color: 'default', icon: BlockIcon },
+};
+
+/**
+ * Theme colour and icon for each reason /insights/at-risk gives; the chip's text is the API's
+ * message, e.g. "2 deliverables past due". Keys are the API's reason codes.
+ */
+export const REASON_META = {
+  deadline_passed: { color: 'overdue', icon: EventBusyIcon },
+  overdue_deliverables: { color: 'overdue', icon: ReportIcon },
+  blocked_deliverables: { color: 'overdue', icon: BlockIcon },
+  behind_schedule: { color: 'atRisk', icon: HourglassBottomIcon },
 };
 
 /** Project statuses in workflow order, as select options. */

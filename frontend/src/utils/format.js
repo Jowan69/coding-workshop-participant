@@ -80,3 +80,33 @@ export function formatPercent(value) {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) return EMPTY;
   return `${Math.round(Number(value) * 10) / 10}%`;
 }
+
+/**
+ * Days until a deadline in words: "in 30 days", "today", "10 days overdue".
+ *
+ * @param {number|null|undefined} days Deadline minus today, negative once it has passed.
+ * @returns {string} Display text, or an em dash when empty.
+ */
+export function formatDaysToDeadline(days) {
+  if (days === null || days === undefined || !Number.isFinite(Number(days))) return EMPTY;
+  const count = Math.abs(Number(days));
+  const unit = count === 1 ? 'day' : 'days';
+  if (days > 0) return `in ${count} ${unit}`;
+  if (days < 0) return `${count} ${unit} overdue`;
+  return 'today';
+}
+
+/**
+ * Whole days from one API date to another, e.g. how late a forecast is against a deadline.
+ *
+ * @param {string} from Earlier API date.
+ * @param {string} to Later API date.
+ * @returns {number|null} `to` minus `from` in days, or null when either is missing.
+ */
+export function daysBetween(from, to) {
+  const start = parseDate(from);
+  const end = parseDate(to);
+  if (!start || !end) return null;
+  // Round, because a daylight-saving change makes one day 23 or 25 hours long.
+  return Math.round((end - start) / 86400000);
+}

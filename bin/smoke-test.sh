@@ -43,6 +43,11 @@ json_string() {
     printf '%s' "$BODY" | sed -n "s/.*\"$1\": *\"\([^\"]*\)\".*/\1/p" | head -n 1
 }
 
+# json_number KEY: the first "KEY": 123 in the last response body
+json_number() {
+    printf '%s' "$BODY" | sed -n "s/.*\"$1\": *\([0-9][0-9]*\).*/\1/p" | head -n 1
+}
+
 json_escape() {
     local text="${1//\\/\\\\}"
     printf '%s' "${text//\"/\\\"}"
@@ -101,6 +106,34 @@ if [ "$STATUS" = 404 ] && [[ "$CTYPE" == application/json* ]] && [[ "$BODY" == *
 else
     fail "unknown project id is a JSON 404" "got $STATUS, content-type '${CTYPE:-none}'"
 fi
+
+# Insights: each dashboard question answers a viewer; "path:key" names a key the body must have
+for pair in project-status:items at-risk:items allocation:resources deliverables:items \
+            over-allocated:items budget:items summary:active_projects; do
+    path="/insights/${pair%%:*}"
+    key="${pair##*:}"
+    request GET "$path" "$VIEWER"
+    if [ "$STATUS" = 200 ] && [[ "$BODY" == *"\"$key\""* ]]; then
+        pass "GET $path as viewer"
+    else
+        fail "GET $path as viewer" "got $STATUS"
+    fi
+done
+
+request GET "/projects?limit=1" "$VIEWER"
+PROJECT_ID="$(json_number id)"
+if [ -n "$PROJECT_ID" ]; then
+    request GET "/insights/dependencies?project_id=$PROJECT_ID" "$VIEWER"
+    if [ "$STATUS" = 200 ] && [[ "$BODY" == *'"longest_chain"'* ]]; then
+        pass "GET /insights/dependencies as viewer"
+    else
+        fail "GET /insights/dependencies as viewer" "got $STATUS"
+    fi
+else
+    fail "GET /insights/dependencies as viewer" "no project to ask about"
+fi
+request GET /insights/dependencies "$VIEWER"
+expect "GET /insights/dependencies without project_id is a 400" 400
 
 echo
 if [ "$FAILURES" -gt 0 ]; then

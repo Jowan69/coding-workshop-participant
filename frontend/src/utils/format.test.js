@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { formatCurrency, formatDate, formatPercent, parseDate } from './format';
+import {
+  daysBetween, formatCurrency, formatDate, formatDaysToDeadline, formatPercent, parseDate,
+} from './format';
 
 describe('formatCurrency', () => {
   it.each([
@@ -29,5 +31,24 @@ describe('dates and percentages', () => {
     expect(formatPercent(42.46)).toBe('42.5%');
     expect(formatPercent(120)).toBe('120%');
     expect(formatPercent(null)).toBe('—');
+  });
+});
+
+describe('days to a deadline', () => {
+  it.each([
+    [30, 'in 30 days'],
+    [1, 'in 1 day'],
+    [0, 'today'],
+    [-1, '1 day overdue'],
+    [-10, '10 days overdue'],
+    [null, '—'],
+  ])('describes %s as %s', (days, expected) => {
+    expect(formatDaysToDeadline(days)).toBe(expected);
+  });
+
+  it('counts whole days between API dates, across month ends', () => {
+    expect(daysBetween('2026-01-30', '2026-03-01')).toBe(30);
+    expect(daysBetween('2026-03-01', '2026-01-30')).toBe(-30);
+    expect(daysBetween(null, '2026-03-01')).toBeNull();
   });
 });

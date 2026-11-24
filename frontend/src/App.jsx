@@ -5,9 +5,9 @@ import AppLayout from './components/AppLayout';
 import ProtectedRoute from './components/ProtectedRoute';
 import { AuthProvider } from './context/AuthContext';
 import { NotificationProvider } from './context/NotificationContext';
+import DashboardPage from './pages/DashboardPage';
 import LoginPage from './pages/LoginPage';
 import NotFoundPage from './pages/NotFoundPage';
-import PlaceholderPage from './pages/PlaceholderPage';
 import ProjectDetailPage from './pages/ProjectDetailPage';
 import ProjectsPage from './pages/ProjectsPage';
 import ResourcesPage from './pages/ResourcesPage';
@@ -24,15 +24,7 @@ export function AppRoutes() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
-        <Route
-          index
-          element={(
-            <PlaceholderPage
-              title="Dashboard"
-              description="Portfolio health, deadline risk and budget at a glance."
-            />
-          )}
-        />
+        <Route index element={<DashboardPage />} />
         <Route path="projects" element={<ProjectsPage />} />
         <Route path="projects/:id" element={<ProjectDetailPage />} />
         <Route path="resources" element={<ResourcesPage />} />

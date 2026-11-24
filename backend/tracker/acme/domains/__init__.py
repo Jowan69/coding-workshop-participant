@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 from acme.core.http import Router
-from acme.domains import allocations, auth, budgets, deliverables, projects, resources
+from acme.domains import (
+    allocations,
+    auth,
+    budgets,
+    deliverables,
+    insights,
+    projects,
+    resources,
+)
 
 
 def build_router() -> Router:
     """Return a Router holding every route of the tracker API."""
     router = Router()
-    for domain in (auth, projects, deliverables, resources, allocations, budgets):
+    for domain in (auth, projects, deliverables, resources, allocations, budgets, insights):
         domain.register_routes(router)
     return router

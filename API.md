@@ -228,6 +228,78 @@ The Lambda accepts paths with or without the `/api/tracker` prefix. The dev prox
   - `percent_used` is null when nothing was planned.
   - A missing or non-numeric `project_id` returns 400; an unknown project returns 404.
 
+### Insights
+
+Read-only answers to the Dashboard's questions. Every insight is a GET, so every role (viewer and above) can call it. There are no write routes: any other method returns 404. Responses are not paginated.
+
+| Method | Path | Minimum role | Query |
+| --- | --- | --- | --- |
+| GET | `/insights/project-status` | viewer | (none) |
+| GET | `/insights/at-risk` | viewer | (none) |
+| GET | `/insights/allocation` | viewer | `on` (a date, default today) |
+| GET | `/insights/deliverables` | viewer | (none) |
+| GET | `/insights/over-allocated` | viewer | `from` (default today), `to` (default `from` + 90 days) |
+| GET | `/insights/dependencies` | viewer | `project_id` (required) |
+| GET | `/insights/budget` | viewer | (none) |
+| GET | `/insights/summary` | viewer | (none) |
+
+**Rules.** "Today" is the database's current date and comes back as `as_of`. The thresholds (20 points, 90 days) are defined once, in `acme/domains/insights_sql.py`.
+
+| Term | Rule |
+| --- | --- |
+| Open project | status is not `completed` or `cancelled` |
+| Overdue deliverable | not `done` and due before today |
+| Time elapsed % | 100 on or after the deadline, 0 up to the start date, otherwise (today − start) ÷ (deadline − start) |
+| Behind schedule | time elapsed % minus percent done is more than 20 points, both rounded to one decimal place. A project with no deliverables is never behind schedule. |
+| Health | `overdue` when the deadline has passed; otherwise `at_risk` when a deliverable is overdue or blocked or the project is behind schedule; otherwise `on_track` |
+| At risk | an open project whose health is not `on_track` |
+| Forecast end date | start + days elapsed × total ÷ done, rounded up to a whole day; null until a deliverable is done |
+| Over-allocated | the sum of a person's allocations on one day exceeds their `capacity_pct` (exactly at capacity is not over). It is evaluated at the window start and at every allocation start date inside the window. |
+| Depth | links on the longest path from a deliverable that depends on nothing (depth 0) |
+| Blocked by upstream | a deliverable it depends on, directly or through others, is `blocked` |
+| Over budget | spent exceeds planned, so any spend without a planned budget is over |
+
+**Responses:**
+- **`GET /insights/project-status`** returns `{"as_of", "items"}`, one item per open project, worst health first:
+  - `id`, `name`, `department`, `status`, `start_date`, `end_date`
+  - `days_to_deadline` (negative once the deadline has passed)
+  - `deliverables_total`, `deliverables_done`
+  - `percent_done` (null without deliverables), `time_elapsed_pct`
+  - `health`
+- **`GET /insights/at-risk`** returns the same item fields for at-risk projects only, plus:
+  - `reasons`: a list of `{"code", "message"}`. The codes are `deadline_passed`, `overdue_deliverables`, `blocked_deliverables` and `behind_schedule`, for example `{"code": "deadline_passed", "message": "Deadline passed 10 days ago"}`.
+  - `forecast_end_date`
+- **`GET /insights/allocation`** returns `{"on", "projects": [{"id", "name"}], "resources": [...]}`:
+  - `projects` are the matrix's columns: every project with an allocation on that day.
+  - `resources` are its rows: every active person, plus inactive people who are allocated that day. Each row has `id`, `full_name`, `capacity_pct`, `total_pct`, `over_capacity` and `cells`, a list of `{"project_id", "allocation_pct"}`.
+- **`GET /insights/deliverables`** returns `{"as_of", "items"}`, one item per open project, most overdue first:
+  - `project_id`, `project_name`, `project_status`
+  - `total`, `counts` (one count per deliverable status), `percent_done`, `overdue`
+  - `next_due`: the unfinished deliverable with the earliest due date on or after today, as `{"id", "title", "status", "due_date"}`, or null
+- **`GET /insights/over-allocated`** returns `{"from", "to", "items"}`, highest peak first:
+  - `resource_id`, `full_name`, `capacity_pct`
+  - `peak_pct` and `peak_on` (the earliest day with that total)
+  - `overlap_start`, `overlap_end`: when the allocations behind the peak all overlap. This range can begin before the window.
+  - `projects`: a list of `{"project_id", "project_name", "allocation_pct"}`
+  - A malformed date, or `to` before `from`, returns 400.
+- **`GET /insights/dependencies?project_id=`** returns `{"project_id", "project_name", "items", "longest_chain"}`:
+  - Items are ordered by depth. Each has `id`, `title`, `status`, `due_date`, `depth`, `depends_on_ids` (direct), `upstream_ids` (direct and indirect) and `blocked_by_upstream`.
+  - `longest_chain` lists deliverable ids from the root to the deepest deliverable.
+  - Only links inside the project are followed. The walk ends even if bad data contains a cycle.
+  - A missing or non-numeric `project_id` returns 400; an unknown project returns 404.
+- **`GET /insights/budget`** returns `{"as_of", "items"}` for every project, closed ones included, highest share used first:
+  - `project_id`, `project_name`, `project_status`
+  - `planned`, `spent`, `remaining`
+  - `percent_used` (null when nothing is planned), `over_budget`
+  - `time_elapsed_pct` and `burn_gap_pts` (percent used minus time elapsed %; positive means money is going faster than the calendar)
+- **`GET /insights/summary`** returns the headline counts, computed by the same queries as the sections:
+  - `as_of`
+  - `active_projects`: status `active`
+  - `at_risk_projects`
+  - `overdue_deliverables`: in open projects
+  - `over_allocated_people`: in the default 90-day window
+  - `over_budget_projects`
+
 ## Demo data
 
 A fresh database is seeded with demo data. Each table is seeded only when it is empty, and every date is relative to today.
@@ -240,4 +312,5 @@ A fresh database is seeded with demo data. Each table is seeded only when it is 
   - Brand Refresh Campaign: over budget
   - ERP Finance Upgrade: completed
   - Market Expansion Study: planned
-- **People:** Aisha Khan and Farid Haddad are booked above 100%.
+- **People:** Aisha Khan and Farid Haddad are booked above 100%. Diego Alvarez reaches exactly 100%, which is not over-allocated.
+- **Insights on the seed:** Data Center Migration is `overdue`. Mobile Banking App and Brand Refresh Campaign are `at_risk`; Brand Refresh qualifies because 62.5% of its time has elapsed with a third of its deliverables done. The summary reads 4 active projects, 3 at risk, 4 overdue deliverables, 2 over-allocated people and 1 over budget.
