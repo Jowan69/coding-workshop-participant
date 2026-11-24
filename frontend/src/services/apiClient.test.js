@@ -187,6 +187,56 @@ describe('request', () => {
 
     await expect(request('/projects')).rejects.toHaveProperty('name', 'AbortError');
   });
+
+  it('signs out when the retry is still refused after a successful refresh', async () => {
+    signIn('expired', 'refresh-1');
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(401, { error: { code: 'token_expired', message: 'Token expired' } }))
+      .mockResolvedValueOnce(jsonResponse(200, { access_token: 'access-2', refresh_token: 'refresh-2', user: USER }))
+      .mockResolvedValueOnce(jsonResponse(401, { error: { code: 'invalid_token', message: 'Token is invalid' } }));
+
+    await expect(request('/projects')).rejects.toMatchObject({ status: 401, code: 'invalid_token' });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(getSession()).toBeNull();
+  });
+
+  it('keeps the session when the refresh cannot reach the server', async () => {
+    signIn('expired', 'refresh-1');
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(401, { error: { code: 'token_expired', message: 'Token expired' } }))
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'));
+
+    await expect(request('/projects')).rejects.toMatchObject({ status: 0, code: 'network_error' });
+    expect(getSession()).toMatchObject({ accessToken: 'expired', refreshToken: 'refresh-1' });
+  });
+
+  it('does not try to refresh when no one is signed in', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: { code: 'missing_token', message: 'Token required' } }));
+
+    await expect(request('/projects')).rejects.toMatchObject({ status: 401, code: 'missing_token' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBeUndefined();
+  });
+
+  it('rejects a successful response whose body is not JSON', async () => {
+    signIn();
+    fetchMock.mockResolvedValueOnce(new Response('<html>index</html>', { status: 200 }));
+
+    await expect(request('/projects')).rejects.toMatchObject({ status: 200, code: 'invalid_response' });
+  });
+
+  it('maps each error status to a readable default when the body has no message', async () => {
+    signIn();
+    const expected = {
+      400: /not valid/, 403: /permission/, 404: /not found/, 409: /conflicts/,
+    };
+    for (const [status, message] of Object.entries(expected)) {
+      fetchMock.mockResolvedValueOnce(new Response('', { status: Number(status) }));
+      await expect(request('/projects')).rejects.toMatchObject({
+        status: Number(status), code: `http_${status}`, message: expect.stringMatching(message),
+      });
+    }
+  });
 });
 
 describe('login', () => {

@@ -29,7 +29,7 @@ function BlockedMarker({ names }) {
       variant="outlined"
       icon={<BlockIcon aria-hidden="true" />}
       label={`Blocked by ${names.join(', ')}`}
-      sx={{ maxWidth: '100%' }}
+      sx={{ maxWidth: '100%', height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.25 } }}
     />
   );
 }

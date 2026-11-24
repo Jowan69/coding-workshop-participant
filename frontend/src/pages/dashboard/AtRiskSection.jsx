@@ -11,6 +11,9 @@ import { SECTION_IDS } from '../../utils/dashboardSections';
 import { daysBetween, formatDate } from '../../utils/format';
 import { REASON_META } from '../../utils/status';
 
+// A reason is a sentence: let it wrap on phones instead of widening the page.
+const WRAPPING_CHIP = { maxWidth: '100%', height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.25 } };
+
 function ReasonChip({ reason }) {
   const meta = REASON_META[reason.code];
   const icon = meta ? <meta.icon aria-hidden="true" /> : undefined;
@@ -21,7 +24,7 @@ function ReasonChip({ reason }) {
       color={meta?.color ?? 'default'}
       icon={icon}
       label={reason.message}
-      sx={{ maxWidth: '100%' }}
+      sx={WRAPPING_CHIP}
     />
   );
 }

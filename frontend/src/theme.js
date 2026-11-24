@@ -73,6 +73,12 @@ const theme = createTheme(base, {
           outline: `3px solid ${FOCUS_RING}`,
           outlineOffset: 2,
         },
+        // InputBase removes the outline on :focus. Outlined fields still show focus with their
+        // border, but borderless selects (deliverable status, rows per page) would show nothing.
+        '.MuiInputBase-root:not(.MuiOutlinedInput-root) .MuiSelect-select:focus-visible': {
+          outline: `3px solid ${FOCUS_RING}`,
+          outlineOffset: 2,
+        },
         '@media (prefers-reduced-motion: reduce)': {
           '*, *::before, *::after': {
             animationDuration: '0.01ms !important',

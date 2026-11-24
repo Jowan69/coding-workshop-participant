@@ -270,7 +270,7 @@ def parse_param(
     text = raw.strip()
     try:
         if kind == "int":
-            if not text.isdigit() or len(text) > 18:
+            if not (text.isascii() and text.isdigit()) or len(text) > 18:
                 raise _Invalid("must be a positive integer")
             return int(text)
         if kind == "bool":

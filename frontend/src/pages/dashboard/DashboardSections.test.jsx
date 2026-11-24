@@ -324,6 +324,16 @@ describe('AtRiskSection', () => {
       .toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Mobile Banking App' })).toHaveAttribute('href', '/projects/3');
   });
+
+  it('lets a long reason wrap instead of widening the page on a phone', async () => {
+    window.innerWidth = 360;
+    useRoutes();
+    renderSection(AtRiskSection);
+    const label = await screen.findByText('Deadline passed 10 days ago');
+    // A chip label is nowrap by default; at 360px a long reason made the page scroll sideways.
+    expect(label).toHaveStyle({ whiteSpace: 'normal' });
+    expect(label.closest('.MuiChip-root')).toHaveStyle({ maxWidth: '100%', height: 'auto' });
+  });
 });
 
 describe('AllocationSection', () => {
@@ -419,6 +429,7 @@ describe('DependencySection', () => {
       ['1', 'Push notifications'],
     ]);
     expect(within(list).getAllByText('Blocked by Payments integration')).toHaveLength(2);
+    expect(within(list).getAllByText('Blocked by Payments integration')[0]).toHaveStyle({ whiteSpace: 'normal' });
     expect(within(rows[1]).queryByText(/Blocked by/)).not.toBeInTheDocument();
     expect(screen.getByText(
       'API contract → Payments integration → Security review → App store submission (3 links)',

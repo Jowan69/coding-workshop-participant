@@ -81,7 +81,8 @@ def _int_param(query: dict[str, str], name: str, default: int, minimum: int) -> 
     raw = query.get(name, "").strip()
     if not raw:
         return default
-    if not raw.isdigit() or len(raw) > 18 or int(raw) < minimum:
+    # isascii(): str.isdigit() also accepts digits such as "²" that int() rejects
+    if not (raw.isascii() and raw.isdigit()) or len(raw) > 18 or int(raw) < minimum:
         message = f"must be an integer of at least {minimum}"
         raise BadRequest(f"Invalid query parameter {name}", [{"field": name, "message": message}])
     return int(raw)

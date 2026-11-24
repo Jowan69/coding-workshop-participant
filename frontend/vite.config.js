@@ -16,6 +16,8 @@ export default defineConfig({
       include: ['src/**/*.{js,jsx}'],
       exclude: ['src/**/*.test.{js,jsx}', 'src/setupTests.js', 'src/main.jsx'],
       reporter: ['text', 'html'],
+      // npm run test:coverage fails below this (TESTING.md); the backend gate is 80% in pyproject.toml
+      thresholds: { lines: 70 },
     },
   },
 });

@@ -385,3 +385,85 @@ describe('budget tab', () => {
     expect(calls('GET', '/projects/1').length).toBeGreaterThan(headerLoads);
   });
 });
+
+describe('when a change is refused or the record is gone', () => {
+  it('keeps the saved status and says why when a status change is refused', async () => {
+    signInAs('contributor');
+    useRoutes({
+      'PUT /deliverables/103': () => {
+        throw new ApiError({ status: 403, code: 'forbidden', message: 'This action requires the contributor role or higher' });
+      },
+    });
+    const user = userEvent.setup();
+    renderAt('/projects/1');
+    await screen.findByRole('table', { name: 'Deliverables' });
+    const headerLoads = calls('GET', '/projects/1').length;
+
+    const status = screen.getByRole('combobox', { name: 'Status of Security review' });
+    await user.click(status);
+    await user.click(await screen.findByRole('option', { name: 'Done' }));
+
+    expect(await screen.findByText('This action requires the contributor role or higher')).toBeInTheDocument();
+    await waitFor(() => expect(status).not.toHaveAttribute('aria-disabled'));
+    expect(status).toHaveTextContent('Not started');
+    expect(calls('GET', '/projects/1')).toHaveLength(headerLoads);
+  });
+
+  it('lets a manager edit and then delete a deliverable', async () => {
+    signInAs('manager');
+    const user = userEvent.setup();
+    renderAt('/projects/1');
+    await screen.findByRole('table', { name: 'Deliverables' });
+
+    await user.click(screen.getByRole('button', { name: 'Edit Security review' }));
+    const form = await screen.findByRole('dialog', { name: 'Edit Security review' });
+    const title = within(form).getByRole('textbox', { name: /^Title/ });
+    await user.clear(title);
+    await user.type(title, 'Security sign-off');
+    await user.click(within(form).getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(calls('PUT', '/deliverables/103')).toHaveLength(1));
+    expect(calls('PUT', '/deliverables/103')[0][1].body).toMatchObject({ title: 'Security sign-off' });
+    expect(await screen.findByText('Deliverable updated')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: 'Delete Security review' }));
+    const confirm = await screen.findByRole('dialog', { name: 'Delete deliverable?' });
+    expect(confirm).toHaveTextContent('"Security review" and its dependency links will be permanently deleted.');
+    await user.click(within(confirm).getByRole('button', { name: 'Delete deliverable' }));
+    expect(request).toHaveBeenCalledWith('/deliverables/103', { method: 'DELETE' });
+    expect(await screen.findByText('Deliverable deleted')).toBeInTheDocument();
+  });
+
+  it('keeps the dialog open and reports a budget entry someone else already deleted', async () => {
+    signInAs('manager');
+    useRoutes({
+      'DELETE /budgets/301': () => {
+        throw new ApiError({ status: 404, code: 'not_found', message: 'Budget entry 301 not found' });
+      },
+    });
+    const user = userEvent.setup();
+    renderAt('/projects/1?tab=budget');
+    await screen.findByRole('table', { name: 'Budget entries' });
+
+    await user.click(screen.getByRole('button', { name: /^Delete \$100,000 labor entry/ }));
+    const confirm = await screen.findByRole('dialog', { name: 'Delete budget entry?' });
+    await user.click(within(confirm).getByRole('button', { name: 'Delete entry' }));
+
+    expect(await screen.findByText('Budget entry 301 not found')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Delete budget entry?' })).toBeInTheDocument();
+  });
+
+  it('removes a team member after confirmation', async () => {
+    signInAs('manager');
+    const user = userEvent.setup();
+    renderAt('/projects/1?tab=team');
+    await screen.findByRole('table', { name: 'Team' });
+
+    await user.click(await screen.findByRole('button', { name: "Delete Aisha Khan's allocation" }));
+    const confirm = await screen.findByRole('dialog', { name: 'Remove from project?' });
+    await user.click(within(confirm).getByRole('button', { name: 'Remove' }));
+
+    expect(request).toHaveBeenCalledWith('/allocations/201', { method: 'DELETE' });
+    await waitFor(() => expect(calls('GET', '/allocations').length).toBeGreaterThan(1));
+  });
+});
