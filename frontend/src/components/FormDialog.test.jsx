@@ -98,7 +98,7 @@ describe('FormDialog', () => {
       name: 'Rocket',
       kind: 'a',
       team: 'Space',
-      owner_id: '7',
+      owner_id: 7,
       start: '2026-01-01',
       amount: 12.5,
     });
@@ -160,6 +160,49 @@ describe('FormDialog', () => {
     expect(screen.getByRole('button', { name: 'Saving…' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
     expect(field('Name')).toBeDisabled();
+  });
+
+  it('sends select options with their own type and checks email and password rules', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <TestProviders>
+        <FormDialog
+          open
+          title="Account"
+          fields={[
+            { name: 'email', label: 'Email', type: 'email', required: true },
+            { name: 'password', label: 'Password', type: 'password', required: true, minLength: 8 },
+            {
+              name: 'is_active',
+              label: 'Status',
+              type: 'select',
+              required: true,
+              defaultValue: true,
+              options: [{ value: true, label: 'Active' }, { value: false, label: 'Inactive' }],
+            },
+          ]}
+          onSubmit={onSubmit}
+          onClose={vi.fn()}
+        />
+      </TestProviders>,
+    );
+
+    await user.type(screen.getByRole('textbox', { name: /^Email/ }), 'nope');
+    await user.type(screen.getByLabelText(/^Password/), 'short');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(screen.getByText('Email must be a valid email address')).toBeInTheDocument();
+    expect(screen.getByText('Password must be at least 8 characters')).toBeInTheDocument();
+
+    await user.type(screen.getByRole('textbox', { name: /^Email/ }), '@acme.test');
+    await user.type(screen.getByLabelText(/^Password/), ' pass ');
+    await user.click(screen.getByRole('combobox', { name: /^Status/ }));
+    await user.click(await screen.findByRole('option', { name: 'Inactive' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(onSubmit).toHaveBeenCalledWith({
+      email: 'nope@acme.test', password: 'short pass ', is_active: false,
+    });
   });
 
   it('is full screen on phones', () => {

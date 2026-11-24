@@ -94,7 +94,19 @@ def test_list_dependencies(api, ids) -> None:
     assert result.status == 200
     assert [d["title"] for d in result.body["items"]] == ["Payments integration"]
     assert result.body["total"] == 1
+    assert [d["title"] for d in result.body["dependents"]] == ["App store submission"]
     assert api.get("/deliverables/999999/dependencies").status == 404
+
+
+def test_dependents_follow_links(api, ids) -> None:
+    contract, push = ids["d"]("API contract"), ids["d"]("Push notifications")
+    before = api.get(f"/deliverables/{contract}/dependencies").body
+    assert (before["items"], [d["title"] for d in before["dependents"]]) == (
+        [], ["Payments integration"])
+    api.post(f"/deliverables/{push}/dependencies", {"depends_on_id": contract})
+    after = api.get(f"/deliverables/{contract}/dependencies").body["dependents"]
+    assert {d["id"] for d in after} == {ids["d"]("Payments integration"), push}
+    assert api.get(f"/deliverables/{push}/dependencies").body["dependents"] == []
 
 
 def test_add_and_remove_a_dependency(api, ids) -> None:

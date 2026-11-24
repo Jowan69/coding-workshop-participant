@@ -90,7 +90,7 @@ def _bad_dependency(message: str) -> BadRequest:
 
 
 def list_dependencies(request: Request) -> Response:
-    """The deliverables this one depends on."""
+    """The deliverables this one depends on (items) and the ones that depend on it (dependents)."""
     deliverable_id = request.params["id"]
     _deliverable(request, deliverable_id)
     items = request.db.execute(
@@ -99,7 +99,16 @@ def list_dependencies(request: Request) -> Response:
         "WHERE dd.deliverable_id = %s ORDER BY d.due_date, d.id",
         (deliverable_id,),
     ).fetchall()
-    return ok({"items": items, "total": len(items), "limit": len(items), "offset": 0})
+    dependents = request.db.execute(
+        "SELECT d.id, d.project_id, d.title, d.status, d.due_date "
+        "FROM deliverable_dependencies dd JOIN deliverables d ON d.id = dd.deliverable_id "
+        "WHERE dd.depends_on_id = %s ORDER BY d.due_date, d.id",
+        (deliverable_id,),
+    ).fetchall()
+    return ok({
+        "items": items, "total": len(items), "limit": len(items), "offset": 0,
+        "dependents": dependents,
+    })
 
 
 def add_dependency(request: Request) -> Response:

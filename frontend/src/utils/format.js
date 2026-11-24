@@ -12,6 +12,13 @@ const currencyFormat = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 0,
 });
 
+const centsFormat = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
 /**
  * Parse an API date (`YYYY-MM-DD`) as a local calendar date, so it never shifts a day across
  * time zones the way `new Date('2026-01-31')` (UTC midnight) does.
@@ -49,15 +56,18 @@ export function formatDate(value) {
 }
 
 /**
- * Format a money amount in whole US dollars, e.g. "$125,000".
+ * Format a money amount in US dollars: whole dollars when there are no cents ("$125,000"),
+ * otherwise with cents ("$1,234.50"). The app's only currency formatter.
  *
- * @param {number|string|null|undefined} value Amount.
+ * @param {number|string|null|undefined} value Amount; may be negative (an overspend).
  * @returns {string} Display text, or an em dash when empty.
  */
 export function formatCurrency(value) {
   if (value === null || value === undefined || value === '') return EMPTY;
   const number = Number(value);
-  return Number.isFinite(number) ? currencyFormat.format(number) : EMPTY;
+  if (!Number.isFinite(number)) return EMPTY;
+  const hasCents = Math.round(number * 100) % 100 !== 0;
+  return (hasCents ? centsFormat : currencyFormat).format(number);
 }
 
 /**

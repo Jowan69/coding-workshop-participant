@@ -82,10 +82,20 @@ describe('routing and layout', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Page not found' })).toBeInTheDocument();
   });
 
-  it('routes to the projects page and the project placeholder', () => {
+  it('routes to a project page', async () => {
     signInAs('viewer');
+    request.mockImplementation(async (path) => (path === '/projects/4'
+      ? { id: 4, name: 'Mobile Banking App', department: 'Digital', status: 'active' }
+      : { items: [], total: 0, limit: 10, offset: 0 }));
     renderAt('/projects/4');
-    expect(screen.getByRole('heading', { level: 1, name: 'Project details' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Mobile Banking App' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Projects' })).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('routes to the resources page', () => {
+    signInAs('viewer');
+    renderAt('/resources');
+    expect(screen.getByRole('heading', { level: 1, name: 'Resources' })).toBeInTheDocument();
   });
 
   it('opens the navigation from the menu button on phones', async () => {

@@ -86,6 +86,7 @@ def test_project_detail_has_delivery_and_budget_figures(api, conn) -> None:
     assert result.body["deliverables_total"] == 5
     assert result.body["percent_complete"] == 20.0
     assert result.body["budget_spent"] == 103500.0
+    assert result.body["owner_name"] == "Maria Gonzalez"
 
 
 def test_list_rows_have_progress_and_spend(api) -> None:
@@ -98,6 +99,7 @@ def test_list_rows_have_progress_and_spend(api) -> None:
         detail = api.get(f"/projects/{project['id']}").body
         assert project["percent_complete"] == detail["percent_complete"]
         assert project["budget_spent"] == detail["budget_spent"]
+        assert project["owner_name"] == detail["owner_name"]
 
 
 def test_detail_of_a_project_without_deliverables(api) -> None:
@@ -119,6 +121,7 @@ def test_create_project(api) -> None:
     assert result.body["status"] == "planned"
     assert result.body["budget_planned"] == 125000.5
     assert result.body["owner_id"] is None
+    assert result.body["owner_name"] is None
     assert api.get(f"/projects/{result.body['id']}").status == 200
 
 

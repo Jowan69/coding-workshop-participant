@@ -14,6 +14,9 @@ import Typography from '@mui/material/Typography';
 import { useIsDesktop } from '../hooks/useIsDesktop';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** Input types passed straight to the TextField; everything else is a plain text box. */
+const NATIVE_TYPES = new Set(['number', 'date', 'email', 'password']);
 
 function isBlank(value) {
   return value === undefined || value === null || String(value).trim() === '';
@@ -24,6 +27,12 @@ function toFormValues(fields, initialValues = {}) {
     const value = initialValues[field.name] ?? field.defaultValue;
     return [field.name, value === null || value === undefined ? '' : String(value)];
   }));
+}
+
+/** Passwords keep their surrounding spaces (the API does not strip them); the rest is trimmed. */
+function clean(field, raw) {
+  const text = String(raw ?? '');
+  return field.type === 'password' ? text : text.trim();
 }
 
 function decimalPlaces(text) {
@@ -41,9 +50,15 @@ function decimalPlaces(text) {
  */
 function validateField(field, raw, values) {
   if (isBlank(raw)) return field.required ? `${field.label} is required` : null;
-  const value = String(raw).trim();
+  const value = clean(field, raw);
+  if (field.minLength && value.length < field.minLength) {
+    return `${field.label} must be at least ${field.minLength} characters`;
+  }
   if (field.maxLength && value.length > field.maxLength) {
     return `${field.label} must be at most ${field.maxLength} characters`;
+  }
+  if (field.type === 'email' && !EMAIL_RE.test(value)) {
+    return `${field.label} must be a valid email address`;
   }
   if (field.type === 'number') {
     const number = Number(value);
@@ -73,18 +88,33 @@ function validateAll(fields, values) {
 }
 
 /**
+ * The typed value to send. The form holds strings, so a select or picker option is mapped
+ * back to its own value (the API rejects "7" for an id and "true" for a boolean).
+ */
+function typedValue(field, value) {
+  if (field.type === 'number') return Number(value);
+  if (field.type === 'select' || (field.type === 'autocomplete' && !field.freeSolo)) {
+    const option = (field.options ?? []).find(
+      (item) => typeof item === 'object' && String(item.value) === value,
+    );
+    return option ? option.value : value;
+  }
+  return value;
+}
+
+/**
  * The request body: typed values; a blank field is sent as null only if it started non-blank
  * (the user cleared it), otherwise left out so the API applies its default.
  */
 function toPayload(fields, values, initial) {
   const payload = {};
-  fields.forEach(({ name, type }) => {
-    const value = String(values[name] ?? '').trim();
+  fields.forEach((field) => {
+    const value = clean(field, values[field.name]);
     if (value === '') {
-      if (initial[name] !== '') payload[name] = null;
+      if (initial[field.name] !== '') payload[field.name] = null;
       return;
     }
-    payload[name] = type === 'number' ? Number(value) : value;
+    payload[field.name] = typedValue(field, value);
   });
   return payload;
 }
@@ -145,14 +175,20 @@ function FieldInput({ field, value, error, disabled, onChange, inputRef }) {
     );
   }
 
-  const htmlInput = field.type === 'number'
-    ? { min: field.min, max: field.max, step: field.step ?? 'any', inputMode: 'decimal' }
-    : {};
+  let htmlInput = {};
+  if (field.type === 'number') {
+    htmlInput = { min: field.min, max: field.max, step: field.step ?? 'any', inputMode: 'decimal' };
+  } else if (field.type === 'password') {
+    // A new password for someone else: never let the browser fill in the admin's own.
+    htmlInput = { autoComplete: 'new-password' };
+  } else if (field.type === 'email') {
+    htmlInput = { autoComplete: 'off' };
+  }
   return (
     <TextField
       {...common}
       name={field.name}
-      type={field.type === 'number' || field.type === 'date' ? field.type : 'text'}
+      type={NATIVE_TYPES.has(field.type) ? field.type : 'text'}
       value={value}
       onChange={(event) => onChange(event.target.value)}
       multiline={Boolean(field.multiline)}
@@ -168,7 +204,7 @@ function FieldInput({ field, value, error, disabled, onChange, inputRef }) {
 const optionShape = PropTypes.oneOfType([
   PropTypes.string,
   PropTypes.shape({
-    value: PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
+    value: PropTypes.oneOfType([PropTypes.string, PropTypes.number, PropTypes.bool]).isRequired,
     label: PropTypes.string.isRequired,
   }),
 ]);
@@ -176,12 +212,15 @@ const optionShape = PropTypes.oneOfType([
 const fieldShape = PropTypes.shape({
   name: PropTypes.string.isRequired,
   label: PropTypes.string.isRequired,
-  type: PropTypes.oneOf(['text', 'number', 'date', 'select', 'autocomplete']).isRequired,
+  type: PropTypes.oneOf([
+    'text', 'number', 'date', 'email', 'password', 'select', 'autocomplete',
+  ]).isRequired,
   required: PropTypes.bool,
   options: PropTypes.arrayOf(optionShape),
   freeSolo: PropTypes.bool,
   multiline: PropTypes.bool,
   minRows: PropTypes.number,
+  minLength: PropTypes.number,
   maxLength: PropTypes.number,
   min: PropTypes.number,
   max: PropTypes.number,
@@ -189,7 +228,7 @@ const fieldShape = PropTypes.shape({
   decimals: PropTypes.number,
   validate: PropTypes.func,
   helperText: PropTypes.string,
-  defaultValue: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  defaultValue: PropTypes.oneOfType([PropTypes.string, PropTypes.number, PropTypes.bool]),
   half: PropTypes.bool,
 });
 
@@ -210,8 +249,9 @@ FieldInput.propTypes = {
  * @param {object} props Component props.
  * @param {boolean} props.open Whether the dialog is shown; opening resets the form.
  * @param {string} props.title Dialog title, e.g. "New project".
- * @param {object[]} props.fields Field specs: name, label, type (text, number, date, select,
- *   autocomplete), required, options, freeSolo, multiline, maxLength, min, max, decimals,
+ * @param {object[]} props.fields Field specs: name, label, type (text, number, date, email,
+ *   password, select, autocomplete), required, options (select and picker options are sent
+ *   with their own type), freeSolo, multiline, minLength, maxLength, min, max, decimals,
  *   validate(value, values) and half (half width on desktop).
  * @param {object} [props.initialValues] Record being edited.
  * @param {(payload: object) => Promise<void>} props.onSubmit Saves; reject with an ApiError to

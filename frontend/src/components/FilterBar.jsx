@@ -15,8 +15,9 @@ import { useIsDesktop } from '../hooks/useIsDesktop';
  *
  * @param {object} props Component props.
  * @param {{name?: string, label: string}} [props.search] Search box; its param defaults to "q".
- * @param {Array<{name: string, label: string, options: Array<{value: string, label: string}>}>}
- *   [props.filters] Select filters, each with an implicit "All" option.
+ * @param {Array<{name: string, label: string, type?: 'select'|'date',
+ *   options?: Array<{value: string, label: string}>}>} [props.filters] Filters: selects (the
+ *   default) with an implicit "All" option, or dates (`YYYY-MM-DD` in the URL).
  * @param {string} [props.ariaLabel] Accessible name of the filter region.
  * @returns {JSX.Element} The filter bar.
  */
@@ -67,10 +68,25 @@ export default function FilterBar({ search, filters = [], ariaLabel = 'Filters' 
       )}
       {filters.map((filter) => {
         const value = params.get(filter.name) ?? '';
+        if (filter.type === 'date') {
+          return (
+            <TextField
+              key={filter.name}
+              type="date"
+              label={filter.label}
+              value={value}
+              onChange={(event) => update({ [filter.name]: event.target.value })}
+              size="small"
+              sx={{ flex: isDesktop ? '0 0 170px' : '1 1 140px' }}
+              slotProps={{ inputLabel: { shrink: true } }}
+            />
+          );
+        }
         // Keep a value from the URL selectable even before its options have loaded.
-        const options = value && !filter.options.some((option) => option.value === value)
-          ? [...filter.options, { value, label: value }]
-          : filter.options;
+        const known = filter.options ?? [];
+        const options = value && !known.some((option) => option.value === value)
+          ? [...known, { value, label: value }]
+          : known;
         return (
           <TextField
             key={filter.name}
@@ -103,10 +119,11 @@ FilterBar.propTypes = {
   filters: PropTypes.arrayOf(PropTypes.shape({
     name: PropTypes.string.isRequired,
     label: PropTypes.string.isRequired,
+    type: PropTypes.oneOf(['select', 'date']),
     options: PropTypes.arrayOf(PropTypes.shape({
       value: PropTypes.string.isRequired,
       label: PropTypes.string.isRequired,
-    })).isRequired,
+    })),
   })),
   ariaLabel: PropTypes.string,
 };

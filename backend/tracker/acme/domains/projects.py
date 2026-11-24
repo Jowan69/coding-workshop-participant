@@ -38,12 +38,14 @@ PROJECTS = Resource(
     default_sort="name",
     checks=(date_order("start_date", "end_date"),),
     # Lists show progress and spend per row, so they are computed in SQL for every read.
+    # owner_name too: only admins can read /auth/users, but everyone sees who owns a project.
     extra_select=sql.SQL(
         "(SELECT COALESCE(round(100.0 * count(*) FILTER (WHERE d.status = 'done') "
         "/ NULLIF(count(*), 0), 1), 0) FROM deliverables d WHERE d.project_id = t.id) "
         "AS percent_complete, "
         "(SELECT COALESCE(sum(b.amount), 0) FROM budget_entries b WHERE b.project_id = t.id) "
-        "AS budget_spent"
+        "AS budget_spent, "
+        "(SELECT u.full_name FROM users u WHERE u.id = t.owner_id) AS owner_name"
     ),
 )
 

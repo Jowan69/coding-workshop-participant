@@ -8,7 +8,10 @@ import { NotificationProvider } from './context/NotificationContext';
 import LoginPage from './pages/LoginPage';
 import NotFoundPage from './pages/NotFoundPage';
 import PlaceholderPage from './pages/PlaceholderPage';
+import ProjectDetailPage from './pages/ProjectDetailPage';
 import ProjectsPage from './pages/ProjectsPage';
+import ResourcesPage from './pages/ResourcesPage';
+import UsersPage from './pages/UsersPage';
 import theme from './theme';
 
 /**
@@ -31,16 +34,13 @@ export function AppRoutes() {
           )}
         />
         <Route path="projects" element={<ProjectsPage />} />
-        <Route path="projects/:id" element={<PlaceholderPage title="Project details" />} />
-        <Route
-          path="resources"
-          element={<PlaceholderPage title="Resources" description="People, capacity and allocations." />}
-        />
+        <Route path="projects/:id" element={<ProjectDetailPage />} />
+        <Route path="resources" element={<ResourcesPage />} />
         <Route
           path="users"
           element={(
             <ProtectedRoute action="manageUsers">
-              <PlaceholderPage title="Users" description="Accounts and roles." />
+              <UsersPage />
             </ProtectedRoute>
           )}
         />

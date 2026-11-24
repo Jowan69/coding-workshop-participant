@@ -111,9 +111,10 @@ The Lambda accepts paths with or without the `/api/tracker` prefix. The dev prox
 | `budget_planned` | 0 or more, default 0 |
 | `owner_id` | an existing user id |
 
-- **Every project read** (list, single read, create and update responses) includes two figures:
+- **Every project read** (list, single read, create and update responses) includes three computed fields:
   - `percent_complete`: done deliverables ÷ all deliverables × 100, to one decimal place (0 with no deliverables)
   - `budget_spent`: the sum of the project's budget entries
+  - `owner_name`: the owner's full name, or null without an owner (only admins can read `/auth/users`)
 - **`GET /projects/{id}`** also adds:
   - `deliverable_counts`, one count per deliverable status
   - `deliverables_total`
@@ -144,7 +145,7 @@ The Lambda accepts paths with or without the `/api/tracker` prefix. The dev prox
 | `assignee_id` | an existing resource id, or null |
 
 - **`completed_at`** is set when the status becomes `done` and cleared when it leaves `done`.
-- **`GET /deliverables/{id}/dependencies`** lists the deliverables this one depends on.
+- **`GET /deliverables/{id}/dependencies`** lists the deliverables this one depends on in `items`, and the ones that depend on it in `dependents`. Each entry has `id`, `project_id`, `title`, `status` and `due_date`.
 - **`POST /deliverables/{id}/dependencies`** takes `{"depends_on_id"}` and returns 201 with the linked deliverable.
   - A self-link, a deliverable from another project, or a link that would create a cycle returns 400, with a message saying which.
   - An existing link returns 409.

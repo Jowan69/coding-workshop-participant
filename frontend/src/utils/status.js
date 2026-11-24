@@ -1,6 +1,7 @@
 import BlockIcon from '@mui/icons-material/Block';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import EventIcon from '@mui/icons-material/Event';
+import MoneyOffIcon from '@mui/icons-material/MoneyOff';
 import PauseCircleIcon from '@mui/icons-material/PauseCircle';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
@@ -29,10 +30,19 @@ export const STATUS_META = {
   not_started: { label: 'Not started', color: 'default', icon: RadioButtonUncheckedIcon },
   in_progress: { label: 'In progress', color: 'primary', icon: ScheduleIcon },
   blocked: { label: 'Blocked', color: 'overdue', icon: BlockIcon },
+  // Money and people
+  over_budget: { label: 'Over budget', color: 'overdue', icon: MoneyOffIcon },
+  over_allocated: { label: 'Over-allocated', color: 'atRisk', icon: WarningAmberIcon },
+  user_active: { label: 'Active', color: 'onTrack', icon: CheckCircleIcon },
+  inactive: { label: 'Inactive', color: 'default', icon: BlockIcon },
 };
 
 /** Project statuses in workflow order, as select options. */
 export const PROJECT_STATUS_OPTIONS = ['planned', 'active', 'on_hold', 'completed', 'cancelled']
+  .map((value) => ({ value, label: STATUS_META[value].label }));
+
+/** Deliverable statuses in workflow order, as select options. */
+export const DELIVERABLE_STATUS_OPTIONS = ['not_started', 'in_progress', 'blocked', 'done']
   .map((value) => ({ value, label: STATUS_META[value].label }));
 
 /**

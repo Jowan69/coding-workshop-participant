@@ -17,6 +17,9 @@ export const ROLE_LABELS = {
   admin: 'Admin',
 };
 
+/** Roles as select options, lowest first. */
+export const ROLE_OPTIONS = ROLES.map((value) => ({ value, label: ROLE_LABELS[value] }));
+
 /**
  * Whether a role may perform an action. The backend enforces the same ranking on every request;
  * this only decides what the UI renders.

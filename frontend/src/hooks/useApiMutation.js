@@ -15,9 +15,13 @@ function failureMessage(error) {
  * @param {string} basePath Collection path, e.g. "/projects".
  * @param {object} [options] Options.
  * @param {string} [options.label] Singular noun for messages, e.g. "Project".
- * @returns {{create: (body: object) => Promise<object>,
- *   update: (id: number, body: object) => Promise<object>,
- *   remove: (id: number) => Promise<null>, saving: boolean}} Mutations and a busy flag.
+ * Each mutation takes an optional last argument that replaces the default success message,
+ * e.g. `update(id, { role }, 'Pat is now a Manager')`.
+ *
+ * @returns {{create: (body: object, message?: string) => Promise<object>,
+ *   update: (id: number, body: object, message?: string) => Promise<object>,
+ *   remove: (id: number, message?: string) => Promise<null>, saving: boolean}} Mutations and a
+ *   busy flag.
  */
 export function useApiMutation(basePath, { label = 'Record' } = {}) {
   const notify = useNotify();
@@ -38,18 +42,24 @@ export function useApiMutation(basePath, { label = 'Record' } = {}) {
   }, [notify]);
 
   const create = useCallback(
-    (body) => run(() => request(basePath, { method: 'POST', body }), `${label} created`),
+    (body, message) => run(
+      () => request(basePath, { method: 'POST', body }),
+      message ?? `${label} created`,
+    ),
     [run, basePath, label],
   );
   const update = useCallback(
-    (id, body) => run(
+    (id, body, message) => run(
       () => request(`${basePath}/${id}`, { method: 'PUT', body }),
-      `${label} updated`,
+      message ?? `${label} updated`,
     ),
     [run, basePath, label],
   );
   const remove = useCallback(
-    (id) => run(() => request(`${basePath}/${id}`, { method: 'DELETE' }), `${label} deleted`),
+    (id, message) => run(
+      () => request(`${basePath}/${id}`, { method: 'DELETE' }),
+      message ?? `${label} deleted`,
+    ),
     [run, basePath, label],
   );
 
