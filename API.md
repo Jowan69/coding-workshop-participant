@@ -111,11 +111,12 @@ The Lambda accepts paths with or without the `/api/tracker` prefix. The dev prox
 | `budget_planned` | 0 or more, default 0 |
 | `owner_id` | an existing user id |
 
-- **`GET /projects/{id}`** adds four figures:
+- **Every project read** (list, single read, create and update responses) includes two figures:
+  - `percent_complete`: done deliverables ÷ all deliverables × 100, to one decimal place (0 with no deliverables)
+  - `budget_spent`: the sum of the project's budget entries
+- **`GET /projects/{id}`** also adds:
   - `deliverable_counts`, one count per deliverable status
   - `deliverables_total`
-  - `percent_complete`: done ÷ total × 100, to one decimal place
-  - `budget_spent`: the sum of the project's budget entries
 - **Deleting a project** also deletes its deliverables, allocations and budget entries.
 
 ### Deliverables and dependencies

@@ -1,0 +1,46 @@
+import BlockIcon from '@mui/icons-material/Block';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import EventIcon from '@mui/icons-material/Event';
+import PauseCircleIcon from '@mui/icons-material/PauseCircle';
+import PlayCircleIcon from '@mui/icons-material/PlayCircle';
+import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
+import ReportIcon from '@mui/icons-material/Report';
+import ScheduleIcon from '@mui/icons-material/Schedule';
+import TrendingUpIcon from '@mui/icons-material/TrendingUp';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+
+/**
+ * Label, theme colour and icon for every status the app shows. `color` is a palette key from
+ * theme.js ('default' is MUI's neutral chip). Keys are the API's values.
+ */
+export const STATUS_META = {
+  // Delivery health
+  on_track: { label: 'On track', color: 'onTrack', icon: TrendingUpIcon },
+  at_risk: { label: 'At risk', color: 'atRisk', icon: WarningAmberIcon },
+  overdue: { label: 'Overdue', color: 'overdue', icon: ReportIcon },
+  done: { label: 'Done', color: 'done', icon: CheckCircleIcon },
+  // Project status
+  planned: { label: 'Planned', color: 'default', icon: EventIcon },
+  active: { label: 'Active', color: 'primary', icon: PlayCircleIcon },
+  on_hold: { label: 'On hold', color: 'atRisk', icon: PauseCircleIcon },
+  completed: { label: 'Completed', color: 'done', icon: CheckCircleIcon },
+  cancelled: { label: 'Cancelled', color: 'default', icon: BlockIcon },
+  // Deliverable status ('done' is shared with health)
+  not_started: { label: 'Not started', color: 'default', icon: RadioButtonUncheckedIcon },
+  in_progress: { label: 'In progress', color: 'primary', icon: ScheduleIcon },
+  blocked: { label: 'Blocked', color: 'overdue', icon: BlockIcon },
+};
+
+/** Project statuses in workflow order, as select options. */
+export const PROJECT_STATUS_OPTIONS = ['planned', 'active', 'on_hold', 'completed', 'cancelled']
+  .map((value) => ({ value, label: STATUS_META[value].label }));
+
+/**
+ * Human label for a status key, falling back to the key with underscores turned into spaces.
+ *
+ * @param {string} status API status value.
+ * @returns {string} Display label.
+ */
+export function statusLabel(status) {
+  return STATUS_META[status]?.label ?? String(status ?? '').replace(/_/g, ' ');
+}

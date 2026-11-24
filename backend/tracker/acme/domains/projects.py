@@ -1,8 +1,8 @@
-"""Projects: CRUD plus delivery and budget figures on the single-project read."""
+"""Projects: CRUD with progress and spend on every read, plus status counts on the detail."""
 
 from __future__ import annotations
 
-from decimal import Decimal
+from psycopg import sql
 
 from acme.core.crud import Filter, Resource, fetch, register
 from acme.core.http import Request, Response, Router, ok
@@ -37,11 +37,19 @@ PROJECTS = Resource(
     sortable=("name", "end_date", "status"),
     default_sort="name",
     checks=(date_order("start_date", "end_date"),),
+    # Lists show progress and spend per row, so they are computed in SQL for every read.
+    extra_select=sql.SQL(
+        "(SELECT COALESCE(round(100.0 * count(*) FILTER (WHERE d.status = 'done') "
+        "/ NULLIF(count(*), 0), 1), 0) FROM deliverables d WHERE d.project_id = t.id) "
+        "AS percent_complete, "
+        "(SELECT COALESCE(sum(b.amount), 0) FROM budget_entries b WHERE b.project_id = t.id) "
+        "AS budget_spent"
+    ),
 )
 
 
 def get_project(request: Request) -> Response:
-    """One project plus deliverable counts by status, percent complete and budget spent."""
+    """One project plus its deliverable counts by status (progress and spend come with it)."""
     project_id = request.params["id"]
     project = fetch(request.db, PROJECTS, project_id)
     rows = request.db.execute(
@@ -50,15 +58,8 @@ def get_project(request: Request) -> Response:
     ).fetchall()
     counts = dict.fromkeys(DELIVERABLE_STATUSES, 0)
     counts.update({row["status"]: row["n"] for row in rows})
-    total = sum(counts.values())
-    spent = request.db.execute(
-        "SELECT COALESCE(sum(amount), 0) AS spent FROM budget_entries WHERE project_id = %s",
-        (project_id,),
-    ).fetchone()["spent"]
     project["deliverable_counts"] = counts
-    project["deliverables_total"] = total
-    project["percent_complete"] = round(100 * counts["done"] / total, 1) if total else 0.0
-    project["budget_spent"] = Decimal(spent)
+    project["deliverables_total"] = sum(counts.values())
     return ok(project)
 
 

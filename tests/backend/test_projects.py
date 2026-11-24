@@ -88,6 +88,18 @@ def test_project_detail_has_delivery_and_budget_figures(api, conn) -> None:
     assert result.body["budget_spent"] == 103500.0
 
 
+def test_list_rows_have_progress_and_spend(api) -> None:
+    items = api.get("/projects", query={"limit": 100}, role="viewer").body["items"]
+    by_name = {p["name"]: p for p in items}
+    mobile = by_name["Mobile Banking App"]
+    assert mobile["percent_complete"] == 20.0
+    assert mobile["budget_spent"] == 103500.0
+    for project in items:
+        detail = api.get(f"/projects/{project['id']}").body
+        assert project["percent_complete"] == detail["percent_complete"]
+        assert project["budget_spent"] == detail["budget_spent"]
+
+
 def test_detail_of_a_project_without_deliverables(api) -> None:
     created = api.post("/projects", PROJECT).body
     detail = api.get(f"/projects/{created['id']}").body
