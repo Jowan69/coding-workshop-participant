@@ -5,14 +5,13 @@ import Chip from '@mui/material/Chip';
 import Link from '@mui/material/Link';
 import Paper from '@mui/material/Paper';
 import Typography from '@mui/material/Typography';
+import AsOfNote from '../../components/AsOfNote';
 import InsightSection from '../../components/InsightSection';
 import StatusChip from '../../components/StatusChip';
+import { WRAPPING_CHIP_SX } from '../../theme';
 import { SECTION_IDS } from '../../utils/dashboardSections';
 import { daysBetween, formatDate } from '../../utils/format';
 import { REASON_META } from '../../utils/status';
-
-// A reason is a sentence: let it wrap on phones instead of widening the page.
-const WRAPPING_CHIP = { maxWidth: '100%', height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.25 } };
 
 function ReasonChip({ reason }) {
   const meta = REASON_META[reason.code];
@@ -24,7 +23,8 @@ function ReasonChip({ reason }) {
       color={meta?.color ?? 'default'}
       icon={icon}
       label={reason.message}
-      sx={WRAPPING_CHIP}
+      // A reason is a sentence: let it wrap on phones instead of widening the page.
+      sx={WRAPPING_CHIP_SX}
     />
   );
 }
@@ -64,11 +64,20 @@ Forecast.propTypes = {
 
 function AtRiskList({ items }) {
   return (
-    <Box component="ul" aria-label="At-risk projects" sx={{ listStyle: 'none', m: 0, p: 0, display: 'grid', gap: 1.5 }}>
+    <Box
+      component="ul"
+      aria-label="At-risk projects"
+      sx={{ listStyle: 'none', m: 0, p: 0, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 1.5 }}
+    >
       {items.map((project) => (
-        <Paper component="li" key={project.id} variant="outlined" sx={{ p: 2, display: 'grid', gap: 1 }}>
+        <Paper
+          component="li"
+          key={project.id}
+          variant="outlined"
+          sx={{ p: 2, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 1, minWidth: 0 }}
+        >
           <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1 }}>
-            <Typography variant="subtitle1" component="h3" sx={{ fontWeight: 600 }}>
+            <Typography variant="subtitle1" component="h3" sx={{ fontWeight: 600, minWidth: 0 }}>
               <Link component={RouterLink} to={`/projects/${project.id}`} underline="hover">
                 {project.name}
               </Link>
@@ -115,7 +124,12 @@ export default function AtRiskSection() {
       isEmpty={(data) => data.items.length === 0}
       emptyMessage="No project is at risk: every open project is on track."
     >
-      {(data) => <AtRiskList items={data.items} />}
+      {(data) => (
+        <>
+          <AtRiskList items={data.items} />
+          <AsOfNote date={data.as_of} />
+        </>
+      )}
     </InsightSection>
   );
 }

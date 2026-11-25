@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from psycopg import sql
+
 from acme.core.crud import Filter, Resource, register
 from acme.core.http import (
     BadRequest,
@@ -44,7 +46,7 @@ DELIVERABLES = Resource(
     fields=(
         reference("project_id", "projects", required=True, updatable=False),
         string("title", required=True, max_length=200),
-        string("description", max_length=2000),
+        string("description", max_length=2000, multiline=True),
         enum("status", STATUSES),
         date_field("due_date", required=True),
         reference("assignee_id", "resources"),
@@ -58,6 +60,10 @@ DELIVERABLES = Resource(
     sortable=("due_date", "title", "status"),
     default_sort="due_date",
     before_save=_stamp_completion,
+    # Overdue (not done and due before today) by the database's clock, with that date
+    extra_select=sql.SQL(
+        "(t.status <> 'done' AND t.due_date < CURRENT_DATE) AS is_overdue, CURRENT_DATE AS as_of"
+    ),
 )
 
 DEPENDENCY_FIELDS = (integer("depends_on_id", required=True, minimum=1),)
@@ -155,7 +161,7 @@ def add_dependency(request: Request) -> Response:
 
 
 def remove_dependency(request: Request) -> Response:
-    """Remove one dependency link."""
+    """Remove one dependency link (contributors and above: it edits, it does not delete)."""
     deliverable_id = request.params["id"]
     depends_on_id = request.params["depends_on_id"]
     removed = request.db.execute(
@@ -173,4 +179,9 @@ def register_routes(router: Router) -> None:
     register(router, "/deliverables", DELIVERABLES)
     router.add("GET", "/deliverables/{id}/dependencies", list_dependencies)
     router.add("POST", "/deliverables/{id}/dependencies", add_dependency)
-    router.add("DELETE", "/deliverables/{id}/dependencies/{depends_on_id}", remove_dependency)
+    # Removing a link edits a deliverable and deletes no record, so the people who may edit
+    # it (contributors) may unlink it; DELETE's default role (manager) is for deleting records.
+    router.add(
+        "DELETE", "/deliverables/{id}/dependencies/{depends_on_id}", remove_dependency,
+        role="contributor",
+    )

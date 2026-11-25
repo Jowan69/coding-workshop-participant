@@ -102,6 +102,7 @@ const server = http.createServer((req, res) => {
       'content-type': headers['content-type'] || 'application/json',
       'user-agent': headers['user-agent'] || 'proxy-server',
       ...(headers.authorization && { authorization: headers.authorization }),
+      ...(headers['idempotency-key'] && { 'idempotency-key': headers['idempotency-key'] }),
       'host': target.host
     }
   };

@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
 import Button from '@mui/material/Button';
 import Dialog from '@mui/material/Dialog';
@@ -8,8 +8,11 @@ import DialogContentText from '@mui/material/DialogContentText';
 import DialogTitle from '@mui/material/DialogTitle';
 
 /**
- * Ask before an irreversible action. While `onConfirm` runs, both buttons are disabled and the
- * dialog cannot be dismissed. The dialog closes itself only if `onConfirm` resolves.
+ * Ask before an irreversible action. From the first click on the confirm button both buttons
+ * are disabled and the dialog cannot be dismissed. After a success they stay disabled while
+ * the dialog closes, so a second click can never repeat the action; they are enabled again
+ * if `onConfirm` fails (to retry) and the next time the dialog opens. A ref guards the gap
+ * before React has re-rendered: a second click in the same tick is ignored.
  *
  * @param {object} props Component props.
  * @param {boolean} props.open Whether the dialog is shown.
@@ -25,17 +28,30 @@ export default function ConfirmDialog({
   open, title, message, confirmLabel = 'Confirm', destructive = false, onConfirm, onClose,
 }) {
   const [busy, setBusy] = useState(false);
+  const confirming = useRef(false);
   const titleId = useId();
   const messageId = useId();
 
+  // A new opening starts enabled (adjusting state during render).
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setBusy(false);
+  }
+  useEffect(() => {
+    if (open) confirming.current = false;
+  }, [open]);
+
   const handleConfirm = async () => {
+    if (confirming.current) return;
+    confirming.current = true;
     setBusy(true);
     try {
       await onConfirm();
       onClose();
     } catch {
       // The caller reports the failure (e.g. a snackbar); keep the dialog open to retry.
-    } finally {
+      confirming.current = false;
       setBusy(false);
     }
   };

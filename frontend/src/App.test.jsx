@@ -30,20 +30,21 @@ beforeEach(() => {
   request.mockResolvedValue({ items: [], total: 0, limit: 10, offset: 0 });
 });
 
+// Phase 6 (G2): route pages are lazy-loaded, so these tests wait for the page (findBy).
 describe('routing and layout', () => {
-  it('sends signed-out users to the sign-in page', () => {
+  it('sends signed-out users to the sign-in page', async () => {
     renderAt('/projects');
-    expect(screen.getByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
   });
 
-  it('shows the app bar, the user, their role and the landmarks', () => {
+  it('shows the app bar, the user, their role and the landmarks', async () => {
     signInAs('manager');
     renderAt('/');
+    expect(await screen.findByRole('heading', { level: 1, name: 'Dashboard' })).toBeInTheDocument();
     expect(screen.getByRole('banner')).toHaveTextContent('ACME Project Tracker');
     expect(screen.getByText('Pat Example')).toBeInTheDocument();
     expect(screen.getByLabelText('Role: Manager')).toBeInTheDocument();
     expect(screen.getByRole('main')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Skip to main content' })).toBeInTheDocument();
   });
 
@@ -61,12 +62,12 @@ describe('routing and layout', () => {
     expect(navLinks()).toEqual(['Dashboard', 'Projects', 'Resources']);
   });
 
-  it('shows admins the Users page and marks the current item', () => {
+  it('shows admins the Users page and marks the current item', async () => {
     signInAs('admin');
     renderAt('/users');
+    expect(await screen.findByRole('heading', { level: 1, name: 'Users' })).toBeInTheDocument();
     expect(navLinks()).toEqual(['Dashboard', 'Projects', 'Resources', 'Users']);
     expect(screen.getByRole('link', { name: 'Users' })).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('heading', { level: 1, name: 'Users' })).toBeInTheDocument();
   });
 
   it('shows a not-allowed page when a non-admin opens /users', () => {
@@ -76,10 +77,10 @@ describe('routing and layout', () => {
     expect(screen.getByText(/Your role \(Contributor\) cannot open it/)).toBeInTheDocument();
   });
 
-  it('shows a not-found page for unknown routes', () => {
+  it('shows a not-found page for unknown routes', async () => {
     signInAs('viewer');
     renderAt('/no-such-page');
-    expect(screen.getByRole('heading', { level: 1, name: 'Page not found' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Page not found' })).toBeInTheDocument();
   });
 
   it('routes to a project page', async () => {
@@ -92,10 +93,10 @@ describe('routing and layout', () => {
     expect(screen.getByRole('link', { name: 'Projects' })).toHaveAttribute('aria-current', 'page');
   });
 
-  it('routes to the resources page', () => {
+  it('routes to the resources page', async () => {
     signInAs('viewer');
     renderAt('/resources');
-    expect(screen.getByRole('heading', { level: 1, name: 'Resources' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Resources' })).toBeInTheDocument();
   });
 
   it('opens the navigation from the menu button on phones', async () => {

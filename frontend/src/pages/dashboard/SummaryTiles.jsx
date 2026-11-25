@@ -15,6 +15,7 @@ import GroupsIcon from '@mui/icons-material/Groups';
 import MoneyOffIcon from '@mui/icons-material/MoneyOff';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import { useRefresh } from '../../context/refresh-context';
 import { useApiGet } from '../../hooks/useApiGet';
 import { SECTION_IDS, sectionHeadingId } from '../../utils/dashboardSections';
 
@@ -93,7 +94,10 @@ Tile.propTypes = {
  * @returns {JSX.Element} The tiles.
  */
 export default function SummaryTiles() {
-  const { data, loading, error, reload } = useApiGet('/insights/summary');
+  const { data, loading, refreshing, error, reload } = useApiGet(
+    '/insights/summary', undefined, useRefresh(),
+  );
+  const showSkeleton = (loading && !refreshing) || !data;
 
   if (error) {
     return (
@@ -115,7 +119,7 @@ export default function SummaryTiles() {
   return (
     <Box component="section" aria-label="Headline counts" aria-busy={loading || undefined} sx={GRID_SX}>
       {TILES.map((tile) => (
-        loading || !data
+        showSkeleton
           ? <Skeleton key={tile.key} variant="rounded" height={104} data-testid="tile-loading" />
           : <Tile key={tile.key} tile={tile} count={data[tile.key] ?? 0} />
       ))}

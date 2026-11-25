@@ -8,10 +8,12 @@ import TextField from '@mui/material/TextField';
 import ClearIcon from '@mui/icons-material/Clear';
 import SearchIcon from '@mui/icons-material/Search';
 import { useIsDesktop } from '../hooks/useIsDesktop';
+import { DATE_MAX, DATE_MIN } from '../utils/format';
 
 /**
  * Search box and select filters whose state lives in the URL query, so a filtered list can be
  * bookmarked, shared and survives a reload. Pages read the same params with useFilterParams.
+ * Changing a filter also removes `page` (see useApiList): the new result starts at page one.
  *
  * @param {object} props Component props.
  * @param {{name?: string, label: string}} [props.search] Search box; its param defaults to "q".
@@ -35,6 +37,7 @@ export default function FilterBar({ search, filters = [], ariaLabel = 'Filters' 
         if (value) next.set(name, value);
         else next.delete(name);
       });
+      next.delete('page'); // a different filter is a different list: back to its first page
       return next;
     }, { replace: true });
   };
@@ -78,7 +81,7 @@ export default function FilterBar({ search, filters = [], ariaLabel = 'Filters' 
               onChange={(event) => update({ [filter.name]: event.target.value })}
               size="small"
               sx={{ flex: isDesktop ? '0 0 170px' : '1 1 140px' }}
-              slotProps={{ inputLabel: { shrink: true } }}
+              slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: DATE_MIN, max: DATE_MAX } }}
             />
           );
         }

@@ -120,8 +120,9 @@ def test_create_project(api) -> None:
     assert result.status == 201
     assert result.body["status"] == "planned"
     assert result.body["budget_planned"] == 125000.5
-    assert result.body["owner_id"] is None
-    assert result.body["owner_name"] is None
+    # Phase 6 (D4): without owner_id the creator (here the contributor) owns the project
+    assert result.body["owner_name"] == "Maria Gonzalez"
+    assert api.get("/projects", query={"owner_id": result.body["owner_id"]}).body["total"] == 3
     assert api.get(f"/projects/{result.body['id']}").status == 200
 
 

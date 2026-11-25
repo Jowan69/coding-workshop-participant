@@ -113,8 +113,12 @@ locals {
     MONGO_PASS    = data.aws_caller_identity.this.id == "000000000000" ? "" : try(one(aws_docdb_cluster.this.*.master_password), "")
     # Tracker API secrets: JWT signing key and the demo users' seed password
     JWT_SECRET    = random_password.jwt.result
-    SEED_PASSWORD = var.demo_password
+    SEED_PASSWORD = local.demo_password
   }
+  # var.demo_password when set; otherwise a fixed value on LocalStack only, a generated one in AWS
+  demo_password = try(trimspace(var.demo_password), "") != "" ? var.demo_password : (
+    data.aws_caller_identity.this.id == "000000000000" ? "AcmeDemo-2026" : random_password.demo.result
+  )
   lambda_role_arn = format(
     "arn:%s:iam::%s:role/%s-lambda-%s-%s",
     data.aws_partition.this.partition, data.aws_caller_identity.this.id,

@@ -35,4 +35,11 @@ describe('FilterBar', () => {
     renderBar('/budget?spent_from=2026-03-01');
     expect(screen.getByLabelText('From')).toHaveValue('2026-03-01');
   });
+
+  it('limits date filters to the days the API accepts (phase 6, E6)', () => {
+    renderBar();
+    const input = screen.getByLabelText('From');
+    expect(input).toHaveAttribute('min', '2000-01-01');
+    expect(input).toHaveAttribute('max', '2100-12-31');
+  });
 });

@@ -23,6 +23,17 @@ from conftest import ROLE_EMAILS, SEED_PASSWORD, id_of
 
 PUBLIC_ROUTES = {("GET", "/health"), ("POST", "/auth/login"), ("POST", "/auth/refresh")}
 
+# Phase 6: the routes whose role is deliberately not the method's default, each by name.
+# Signing out and changing your own password are for every signed-in role (B2, B3).
+ROLE_EXCEPTIONS = {
+    ("POST", "/auth/logout"): "viewer",
+    ("POST", "/auth/change-password"): "viewer",
+    # People who can edit a project must be able to pick its owner (D4): names only.
+    ("GET", "/auth/users/options"): "contributor",
+    # Removing a dependency link edits a deliverable and deletes no record (F2).
+    ("DELETE", "/deliverables/{id}/dependencies/{depends_on_id}"): "contributor",
+}
+
 
 def _routes():
     import function
@@ -46,7 +57,13 @@ def test_every_route_role_follows_the_method_rule() -> None:
             continue
         admin_only = route.template.startswith("/auth/users")
         expected = "admin" if admin_only else ROLE_FOR_METHOD[route.method]
+        expected = ROLE_EXCEPTIONS.get((route.method, route.template), expected)
         assert route.min_role == expected, f"{route.method} {route.template}"
+
+
+def test_every_role_exception_names_a_real_route() -> None:
+    templates = {(route.method, route.template) for route in _routes()}
+    assert set(ROLE_EXCEPTIONS) <= templates
 
 
 def test_every_private_route_answers_401_without_a_token(api) -> None:
@@ -139,7 +156,9 @@ def test_no_user_response_contains_a_password_hash(api, conn) -> None:
     for result in responses:
         assert result.status in (200, 201)
         text = json.dumps(result.body)
-        assert "password" not in text and "scrypt$" not in text
+        # Phase 6 (B5): the only allowed mention is the flag "must_change_password"
+        assert "password" not in text.replace('"must_change_password"', "")
+        assert "scrypt$" not in text and "token_version" not in text
 
 
 @pytest.mark.parametrize(

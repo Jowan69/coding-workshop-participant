@@ -4,6 +4,7 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import AddIcon from '@mui/icons-material/Add';
+import AsOfNote from '../components/AsOfNote';
 import BudgetBar from '../components/BudgetBar';
 import ConfirmDialog from '../components/ConfirmDialog';
 import DataList from '../components/DataList';
@@ -14,13 +15,14 @@ import ProgressBar from '../components/ProgressBar';
 import RowActions from '../components/RowActions';
 import StatusChip from '../components/StatusChip';
 import { useAuth } from '../context/auth-context';
+import { useApiGet } from '../hooks/useApiGet';
 import { useApiList } from '../hooks/useApiList';
 import { useApiMutation } from '../hooks/useApiMutation';
 import { useDepartments } from '../hooks/useDepartments';
 import { useClearFilters, useFilterParams } from '../hooks/useFilterParams';
 import { formatDate } from '../utils/format';
 import { PROJECT_STATUS_OPTIONS } from '../utils/status';
-import { isProjectOverdue, projectFields } from './projectFields';
+import { isProjectOverdue, ownerOptions, projectFields } from './projectFields';
 
 const FILTER_NAMES = ['q', 'status', 'department'];
 const CLOSED = { open: false, record: null };
@@ -41,10 +43,20 @@ DeadlineCell.propTypes = {
 };
 
 const COLUMNS = [
-  { key: 'name', label: 'Name' },
+  { key: 'name', label: 'Name', sortKey: 'name' },
   { key: 'department', label: 'Department' },
-  { key: 'status', label: 'Status', render: (project) => <StatusChip status={project.status} /> },
-  { key: 'end_date', label: 'Deadline', render: (project) => <DeadlineCell project={project} /> },
+  {
+    key: 'status',
+    label: 'Status',
+    sortKey: 'status',
+    render: (project) => <StatusChip status={project.status} />,
+  },
+  {
+    key: 'end_date',
+    label: 'Deadline',
+    sortKey: 'end_date',
+    render: (project) => <DeadlineCell project={project} />,
+  },
   {
     key: 'percent_complete',
     label: '% complete',
@@ -67,24 +79,34 @@ const COLUMNS = [
 
 /**
  * Projects: search and filter, then create, edit and delete as the role allows.
- * A row opens the project's page.
+ * A row opens the project's page. A new project's owner defaults to the signed-in user and
+ * can be changed or cleared; an edit sends only what changed and is refused if someone else
+ * changed the project first (the form then offers to reload it).
  *
  * @returns {JSX.Element} The projects page.
  */
 export default function ProjectsPage() {
-  const { can } = useAuth();
+  const { can, user } = useAuth();
   const canWrite = can('write');
   const canDelete = can('delete');
   const filters = useFilterParams(FILTER_NAMES);
   const clearFilters = useClearFilters(FILTER_NAMES);
-  const list = useApiList('/projects', filters);
-  const { create, update, remove } = useApiMutation('/projects', { label: 'Project' });
+  const list = useApiList('/projects', filters, { columns: COLUMNS, defaultSort: 'name' });
+  const { create, update, remove, fetchOne } = useApiMutation('/projects', {
+    label: 'Project', onStale: list.reload,
+  });
   const [changes, setChanges] = useState(0);
   const departments = useDepartments('/projects', changes);
+  // Only people who can edit projects may list the users to choose an owner from.
+  const users = useApiGet(canWrite ? '/auth/users/options' : null);
   const [form, setForm] = useState(CLOSED);
   const [deletion, setDeletion] = useState(CLOSED);
 
-  const fields = useMemo(() => projectFields(departments), [departments]);
+  const owners = useMemo(
+    () => ownerOptions(users.data?.items, user, form.record),
+    [users.data, user, form.record],
+  );
+  const fields = useMemo(() => projectFields(departments, owners), [departments, owners]);
   const filterSpecs = useMemo(() => [
     { name: 'status', label: 'Status', options: PROJECT_STATUS_OPTIONS },
     {
@@ -102,10 +124,17 @@ export default function ProjectsPage() {
   const openCreate = () => setForm({ open: true, record: null });
   const editing = form.record;
 
-  const handleSave = async (payload) => {
-    if (editing) await update(editing.id, payload);
-    else await create(payload);
+  const handleSave = async (payload, context) => {
+    if (editing) await update(editing.id, payload, undefined, context);
+    else await create(payload, undefined, context);
     afterChange();
+  };
+
+  const reloadEditing = async () => {
+    const fresh = await fetchOne(editing.id);
+    setForm({ open: true, record: fresh });
+    list.reload();
+    return fresh;
   };
 
   const handleDelete = async () => {
@@ -172,16 +201,22 @@ export default function ProjectsPage() {
         rowsPerPage={list.rowsPerPage}
         onPageChange={list.setPage}
         onRowsPerPageChange={list.setRowsPerPage}
+        sort={list.sort}
+        onSortChange={list.setSort}
+        sortChoices={list.sortChoices}
         getRowHref={(project) => `/projects/${project.id}`}
         rowActions={rowActions}
         emptyState={emptyState}
       />
+      <AsOfNote date={list.items[0]?.as_of} />
       {canWrite && (
         <FormDialog
           open={form.open}
           title={editing ? `Edit ${editing.name}` : 'New project'}
           fields={fields}
-          initialValues={editing ?? undefined}
+          initialValues={editing ?? { owner_id: user?.id }}
+          changesOnly={Boolean(editing)}
+          onReload={editing ? reloadEditing : undefined}
           onSubmit={handleSave}
           onClose={() => setForm((current) => ({ ...current, open: false }))}
           submitLabel={editing ? 'Save changes' : 'Create project'}

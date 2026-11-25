@@ -244,6 +244,10 @@ frontend/node_modules/
 !frontend/package.json
 !frontend/README.md
 
+# Keep the frontend's lockfile (package-lock.json* is ignored above for the examples): CI
+# installs with npm ci, so every run and every deploy resolves the same versions
+!frontend/package-lock.json
+
 # Terraform plan files
 tfplan
 *.tfplan

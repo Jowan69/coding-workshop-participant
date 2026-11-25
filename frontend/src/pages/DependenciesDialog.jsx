@@ -182,8 +182,8 @@ AddDependency.propTypes = {
 };
 
 /**
- * One deliverable's dependencies: what it depends on (removable by managers), what depends on
- * it, and a picker to add a link within the same project. When the API refuses a link (a
+ * One deliverable's dependencies: what it depends on (removable by anyone who can edit), what
+ * depends on it, and a picker to add a link within the same project. When the API refuses a link (a
  * cycle, a duplicate) its reason is shown on the picker. Full screen on phones.
  *
  * Mount it with a new `key` each time it opens, so it loads fresh links.
@@ -260,7 +260,8 @@ export default function DependenciesDialog({ open, deliverable, onClose }) {
           hint="Must be finished before this one can be."
           items={dependsOn}
           emptyText="Does not depend on anything."
-          onRemove={can('delete') ? handleRemove : undefined}
+          // Unlinking edits this deliverable and deletes no record, so "write" is enough.
+          onRemove={can('write') ? handleRemove : undefined}
           removingId={removingId}
         />
         <LinkList

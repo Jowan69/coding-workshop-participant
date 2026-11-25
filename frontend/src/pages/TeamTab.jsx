@@ -5,17 +5,27 @@ import Button from '@mui/material/Button';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import ConfirmDialog from '../components/ConfirmDialog';
 import DataList from '../components/DataList';
+import FilterBar from '../components/FilterBar';
 import FormDialog from '../components/FormDialog';
 import RowActions from '../components/RowActions';
 import { useAuth } from '../context/auth-context';
 import { useNotify } from '../context/notification-context';
 import { useApiList } from '../hooks/useApiList';
 import { useApiMutation } from '../hooks/useApiMutation';
+import { useClearFilters, useFilterParams } from '../hooks/useFilterParams';
 import { useResourceLookup } from '../hooks/useResourceLookup';
 import { formatDate, formatPercent } from '../utils/format';
 import { allocationFields } from './allocationFields';
 
 const CLOSED = { open: false, record: null };
+const FILTER_NAMES = ['resource_id', 'active_on'];
+/** The sortable columns (API sort keys); the cells are added in the component. */
+const SORT_COLUMNS = [
+  { key: 'allocation_pct', label: 'Allocation', sortKey: 'allocation_pct' },
+  { key: 'start_date', label: 'Start date', sortKey: 'start_date' },
+  { key: 'end_date', label: 'End date', sortKey: 'end_date' },
+];
+const LIST_OPTIONS = { columns: SORT_COLUMNS, defaultSort: 'start_date' };
 
 /**
  * The snackbar text for an over-allocation warning, or null when the save had none.
@@ -31,8 +41,9 @@ function overAllocationMessage(saved, name) {
 }
 
 /**
- * Who works on a project: each allocation's person, role, share of time and dates, with add,
- * edit and delete as the role allows. Over-allocation is allowed, but the save is followed by
+ * Who works on a project: each allocation's person, role, share of time and dates, with
+ * filters for one person and for the allocations active on a day, and add, edit and delete as
+ * the role allows. Over-allocation is allowed, but the save is followed by
  * a warning snackbar with the person's new total.
  *
  * @param {object} props Component props.
@@ -45,9 +56,13 @@ export default function TeamTab({ project }) {
   const canWrite = can('write');
   const canDelete = can('delete');
   const notify = useNotify();
-  const query = useMemo(() => ({ project_id: project.id }), [project.id]);
-  const list = useApiList('/allocations', query);
-  const { create, update, remove } = useApiMutation('/allocations', { label: 'Allocation' });
+  const filters = useFilterParams(FILTER_NAMES);
+  const clearFilters = useClearFilters(FILTER_NAMES);
+  const query = useMemo(() => ({ ...filters, project_id: project.id }), [filters, project.id]);
+  const list = useApiList('/allocations', query, LIST_OPTIONS);
+  const { create, update, remove, fetchOne } = useApiMutation('/allocations', {
+    label: 'Allocation', onStale: list.reload,
+  });
   const people = useResourceLookup();
   const [form, setForm] = useState(CLOSED);
   const [deletion, setDeletion] = useState(CLOSED);
@@ -58,13 +73,28 @@ export default function TeamTab({ project }) {
     [people, editing],
   );
   const newDefaults = { start_date: project.start_date, end_date: project.end_date };
+  const filterSpecs = useMemo(() => [
+    {
+      name: 'resource_id',
+      label: 'Person',
+      options: people.resources.map((person) => ({ value: String(person.id), label: person.full_name })),
+    },
+    { name: 'active_on', label: 'Active on', type: 'date' },
+  ], [people]);
 
   const openCreate = () => setForm({ open: true, record: null });
 
-  const handleSave = async (payload) => {
+  const reloadEditing = async () => {
+    const fresh = await fetchOne(editing.id);
+    setForm({ open: true, record: fresh });
+    list.reload();
+    return fresh;
+  };
+
+  const handleSave = async (payload, context) => {
     const saved = editing
-      ? await update(editing.id, payload)
-      : await create({ ...payload, project_id: project.id });
+      ? await update(editing.id, payload, undefined, context)
+      : await create({ ...payload, project_id: project.id }, undefined, context);
     list.reload();
     const warning = overAllocationMessage(saved, people.nameOf(saved?.resource_id));
     if (warning) notify(warning, 'warning');
@@ -81,12 +111,14 @@ export default function TeamTab({ project }) {
     {
       key: 'allocation_pct',
       label: 'Allocation',
+      sortKey: 'allocation_pct',
       align: 'right',
       render: (row) => formatPercent(row.allocation_pct),
     },
     {
       key: 'dates',
       label: 'Dates',
+      sortKey: 'start_date', // the header sorts by start; the phone select also offers the end
       render: (row) => `${formatDate(row.start_date)} – ${formatDate(row.end_date)}`,
     },
   ];
@@ -101,28 +133,41 @@ export default function TeamTab({ project }) {
     )
     : undefined;
 
-  const emptyState = canWrite
-    ? {
+  const hasFilters = FILTER_NAMES.some((name) => filters[name]);
+  let emptyState;
+  if (hasFilters) {
+    emptyState = {
+      title: 'No allocations match these filters',
+      message: 'Try another person or date, or clear the filters to see the whole team.',
+      action: { label: 'Clear filters', onClick: clearFilters },
+    };
+  } else if (canWrite) {
+    emptyState = {
       title: 'Nobody is allocated yet',
       message: 'Add people to show who works on this project and how much of their time it takes.',
       action: { label: 'Add person', onClick: openCreate },
-    }
-    : {
+    };
+  } else {
+    emptyState = {
       title: 'Nobody is allocated yet',
       message: 'People appear here once a team lead or project manager allocates them.',
     };
+  }
 
   const deletingName = deletion.record ? people.nameOf(deletion.record.resource_id) : '';
 
   return (
     <>
-      {canWrite && (
-        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
-          <Button variant="contained" startIcon={<PersonAddIcon />} onClick={openCreate}>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: 2 }}>
+        <Box sx={{ flex: '1 1 320px', minWidth: 0 }}>
+          <FilterBar ariaLabel="Filter team" filters={filterSpecs} />
+        </Box>
+        {canWrite && (
+          <Button variant="contained" startIcon={<PersonAddIcon />} onClick={openCreate} sx={{ mb: 2 }}>
             Add person
           </Button>
-        </Box>
-      )}
+        )}
+      </Box>
       <DataList
         ariaLabel="Team"
         columns={columns}
@@ -135,6 +180,9 @@ export default function TeamTab({ project }) {
         rowsPerPage={list.rowsPerPage}
         onPageChange={list.setPage}
         onRowsPerPageChange={list.setRowsPerPage}
+        sort={list.sort}
+        onSortChange={list.setSort}
+        sortChoices={list.sortChoices}
         rowActions={rowActions}
         emptyState={emptyState}
       />
@@ -144,6 +192,8 @@ export default function TeamTab({ project }) {
           title={editing ? `Edit ${people.nameOf(editing.resource_id)}'s allocation` : 'Add person to project'}
           fields={fields}
           initialValues={editing ?? newDefaults}
+          changesOnly={Boolean(editing)}
+          onReload={editing ? reloadEditing : undefined}
           onSubmit={handleSave}
           onClose={() => setForm((current) => ({ ...current, open: false }))}
           submitLabel={editing ? 'Save changes' : 'Add person'}

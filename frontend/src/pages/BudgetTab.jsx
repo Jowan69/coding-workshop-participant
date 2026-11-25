@@ -21,7 +21,7 @@ import { useClearFilters, useFilterParams } from '../hooks/useFilterParams';
 import { formatCurrency, formatDate, todayIso } from '../utils/format';
 import { BUDGET_CATEGORY_OPTIONS, budgetFields, categoryLabel } from './budgetFields';
 
-const FILTER_NAMES = ['category', 'spent_from', 'spent_to'];
+const FILTER_NAMES = ['q', 'category', 'spent_from', 'spent_to'];
 const FILTER_SPECS = [
   { name: 'category', label: 'Category', options: BUDGET_CATEGORY_OPTIONS },
   { name: 'spent_from', label: 'From', type: 'date' },
@@ -31,12 +31,18 @@ const FIELDS = budgetFields();
 const CLOSED = { open: false, record: null };
 
 const COLUMNS = [
-  { key: 'spent_on', label: 'Date', render: (entry) => formatDate(entry.spent_on) },
-  { key: 'category', label: 'Category', render: (entry) => categoryLabel(entry.category) },
+  { key: 'spent_on', label: 'Date', sortKey: 'spent_on', render: (entry) => formatDate(entry.spent_on) },
+  {
+    key: 'category',
+    label: 'Category',
+    sortKey: 'category',
+    render: (entry) => categoryLabel(entry.category),
+  },
   { key: 'description', label: 'Description' },
   {
     key: 'amount',
     label: 'Amount',
+    sortKey: 'amount',
     align: 'right',
     render: (entry) => (
       <Typography variant="body2" component="span" sx={{ fontVariantNumeric: 'tabular-nums' }}>
@@ -76,8 +82,8 @@ SummarySection.propTypes = {
 };
 
 /**
- * A project's budget: the planned-versus-spent summary, then the spending entries with
- * category and date filters, and add, edit and delete as the role allows.
+ * A project's budget: the planned-versus-spent summary, then the spending entries with a
+ * description search and category and date filters, and add, edit and delete as the role allows.
  *
  * @param {object} props Component props.
  * @param {{id: number}} props.project The project.
@@ -92,8 +98,10 @@ export default function BudgetTab({ project, onProjectChange }) {
   const filters = useFilterParams(FILTER_NAMES);
   const clearFilters = useClearFilters(FILTER_NAMES);
   const query = useMemo(() => ({ ...filters, project_id: project.id }), [filters, project.id]);
-  const list = useApiList('/budgets', query);
-  const { create, update, remove } = useApiMutation('/budgets', { label: 'Budget entry' });
+  const list = useApiList('/budgets', query, { columns: COLUMNS, defaultSort: '-spent_on' });
+  const { create, update, remove, fetchOne } = useApiMutation('/budgets', {
+    label: 'Budget entry', onStale: list.reload,
+  });
   const [form, setForm] = useState(CLOSED);
   const [deletion, setDeletion] = useState(CLOSED);
 
@@ -107,10 +115,17 @@ export default function BudgetTab({ project, onProjectChange }) {
 
   const openCreate = () => setForm({ open: true, record: null });
 
-  const handleSave = async (payload) => {
-    if (editing) await update(editing.id, payload);
-    else await create({ ...payload, project_id: project.id });
+  const handleSave = async (payload, context) => {
+    if (editing) await update(editing.id, payload, undefined, context);
+    else await create({ ...payload, project_id: project.id }, undefined, context);
     afterChange();
+  };
+
+  const reloadEditing = async () => {
+    const fresh = await fetchOne(editing.id);
+    setForm({ open: true, record: fresh });
+    list.reload();
+    return fresh;
   };
 
   const handleDelete = async () => {
@@ -135,7 +150,7 @@ export default function BudgetTab({ project, onProjectChange }) {
   if (hasFilters) {
     emptyState = {
       title: 'No entries match these filters',
-      message: 'Try another category or dates, or clear the filters to see every entry.',
+      message: 'Try another search, category or dates, or clear the filters to see every entry.',
       action: { label: 'Clear filters', onClick: clearFilters },
     };
   } else if (canWrite) {
@@ -152,7 +167,7 @@ export default function BudgetTab({ project, onProjectChange }) {
   }
 
   return (
-    <Box sx={{ display: 'grid', gap: 3 }}>
+    <Box sx={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 3 }}>
       <SummarySection summary={summary} />
       <Box component="section" aria-labelledby="budget-entries-heading">
         <Box
@@ -172,7 +187,11 @@ export default function BudgetTab({ project, onProjectChange }) {
             </Button>
           )}
         </Box>
-        <FilterBar ariaLabel="Filter budget entries" filters={FILTER_SPECS} />
+        <FilterBar
+          ariaLabel="Filter budget entries"
+          search={{ label: 'Search descriptions' }}
+          filters={FILTER_SPECS}
+        />
         <DataList
           ariaLabel="Budget entries"
           columns={COLUMNS}
@@ -185,6 +204,9 @@ export default function BudgetTab({ project, onProjectChange }) {
           rowsPerPage={list.rowsPerPage}
           onPageChange={list.setPage}
           onRowsPerPageChange={list.setRowsPerPage}
+          sort={list.sort}
+          onSortChange={list.setSort}
+          sortChoices={list.sortChoices}
           rowActions={rowActions}
           emptyState={emptyState}
         />
@@ -195,6 +217,8 @@ export default function BudgetTab({ project, onProjectChange }) {
           title={editing ? 'Edit budget entry' : 'New budget entry'}
           fields={FIELDS}
           initialValues={editing ?? { spent_on: todayIso() }}
+          changesOnly={Boolean(editing)}
+          onReload={editing ? reloadEditing : undefined}
           onSubmit={handleSave}
           onClose={() => setForm((current) => ({ ...current, open: false }))}
           submitLabel={editing ? 'Save changes' : 'Add entry'}

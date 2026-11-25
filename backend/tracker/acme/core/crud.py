@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from psycopg import sql
 
 from acme.core.http import (
     BadRequest,
+    Conflict,
     Handler,
     NotFound,
     Request,
@@ -19,7 +21,15 @@ from acme.core.http import (
     no_content,
     ok,
 )
-from acme.core.validation import Check, Field, FieldError, check_references, clean, parse_param
+from acme.core.validation import (
+    Check,
+    Field,
+    FieldError,
+    check_references,
+    clean,
+    has_control_characters,
+    parse_param,
+)
 
 if TYPE_CHECKING:
     import psycopg
@@ -124,6 +134,9 @@ def list_rows(request: Request, res: Resource) -> dict[str, Any]:
             conditions.append(condition)
             params.extend([value] * arity)
     search = query.get("q", "").strip()
+    if has_control_characters(search):
+        message = "must not contain control characters"
+        raise BadRequest("Invalid query parameter q", [{"field": "q", "message": message}])
     if search and res.searchable:
         matches = [sql.SQL("{} ILIKE %s").format(sql.Identifier("t", c)) for c in res.searchable]
         conditions.append(sql.SQL("({})").format(sql.SQL(" OR ").join(matches)))
@@ -215,17 +228,63 @@ def create_row(request: Request, res: Resource) -> dict[str, Any]:
     return res.after_save(request, row) if res.after_save else row
 
 
+STALE_FIELD = "expected_updated_at"
+
+
+def _refuse_stale(request: Request, res: Resource, existing: dict[str, Any]) -> None:
+    """Refuse an update made from an out-of-date copy of the row (a lost update).
+
+    A client sends ``expected_updated_at``, the ``updated_at`` it read. ``existing`` was
+    read ``FOR UPDATE``, so the comparison and the write that follows cannot be separated
+    by another writer. Timestamps are compared as instants, whatever their text form.
+
+    Raises:
+        BadRequest: If ``expected_updated_at`` is not an ISO 8601 timestamp with an offset.
+        Conflict: ``stale_record`` when the row changed after the client read it.
+    """
+    if not isinstance(request.body, dict):
+        return
+    raw = request.body.get(STALE_FIELD)
+    if raw is None or raw == "":
+        return
+    try:
+        if not isinstance(raw, str):
+            raise ValueError("not text")
+        expected = datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
+        if expected.tzinfo is None:
+            raise ValueError("no offset")
+    except ValueError as exc:
+        message = "must be the ISO 8601 timestamp (with its offset) that updated_at returned"
+        raise BadRequest(
+            "Validation failed", [{"field": STALE_FIELD, "message": message}]
+        ) from exc
+    if expected.astimezone(timezone.utc) != existing["updated_at"].astimezone(timezone.utc):
+        raise Conflict(
+            f"This {res.label} was changed by someone else after you loaded it. "
+            "Reload it and try again.",
+            code="stale_record",
+        )
+
+
 def update_row(request: Request, res: Resource) -> dict[str, Any]:
-    """Apply a partial update to ``request.params["id"]`` and return the updated row."""
+    """Apply a partial update to ``request.params["id"]`` and return the updated row.
+
+    With ``expected_updated_at`` in the body the update is refused with 409
+    ``stale_record`` when the row has changed since the client read it.
+    """
     row_id = request.params["id"]
     existing = _fetch_for_update(request.db, res, row_id)
+    _refuse_stale(request, res, existing)
     values = _validated(request, res, existing)
     if res.before_save:
         res.before_save(request, values, existing)
     assignments = sql.SQL(", ").join(
         sql.SQL("{} = %s").format(sql.Identifier(column)) for column in values
     )
-    query = sql.SQL("UPDATE {} SET {}, updated_at = now() WHERE id = %s").format(
+    # clock_timestamp(), not now(): now() is the transaction's start time, so it can repeat
+    # or even move backwards between writers. expected_updated_at needs every update to
+    # leave a new value.
+    query = sql.SQL("UPDATE {} SET {}, updated_at = clock_timestamp() WHERE id = %s").format(
         sql.Identifier(res.table), assignments
     )
     request.db.execute(query, [*values.values(), row_id])

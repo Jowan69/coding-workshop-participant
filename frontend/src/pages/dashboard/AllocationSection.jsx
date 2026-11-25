@@ -13,7 +13,7 @@ import InsightSection from '../../components/InsightSection';
 import StatusChip from '../../components/StatusChip';
 import { useIsDesktop } from '../../hooks/useIsDesktop';
 import { SECTION_IDS } from '../../utils/dashboardSections';
-import { formatDate } from '../../utils/format';
+import { DATE_MAX, DATE_MIN, formatDate } from '../../utils/format';
 
 // The person column stays put while the project columns scroll sideways.
 const STICKY_SX = {
@@ -69,7 +69,12 @@ function AllocationMatrix({ matrix }) {
           <TableRow>
             <TableCell scope="col" sx={STICKY_SX}>Person</TableCell>
             {matrix.projects.map((project) => (
-              <TableCell key={project.id} scope="col" align="right" sx={{ minWidth: 110 }}>
+              <TableCell
+                key={project.id}
+                scope="col"
+                align="right"
+                sx={{ minWidth: 110, maxWidth: 220, whiteSpace: 'normal' }}
+              >
                 {project.name}
               </TableCell>
             ))}
@@ -132,7 +137,7 @@ export default function AllocationSection() {
           value={day}
           onChange={(event) => setDay(event.target.value)}
           helperText={day ? undefined : 'Today'}
-          slotProps={{ inputLabel: { shrink: true } }}
+          slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: DATE_MIN, max: DATE_MAX } }}
         />
       )}
     >

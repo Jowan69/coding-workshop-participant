@@ -18,6 +18,10 @@ logger = logging.getLogger("acme.db")
 
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schema.sql"
 SCHEMA_LOCK_KEY = 72_430_001  # advisory lock id shared by every container of this app
+STATEMENT_TIMEOUT_MS = 15_000  # no query may hold a request (and a Lambda) longer than this
+# statement_timeout: the server cancels a slow query, which http.py reports as a 503.
+# timezone: CURRENT_DATE, the one clock behind "overdue" and "today", is the UTC date.
+CONNECTION_OPTIONS = f"-c statement_timeout={STATEMENT_TIMEOUT_MS} -c timezone=UTC"
 
 T = TypeVar("T")
 
@@ -27,7 +31,7 @@ _schema_ready = False
 
 
 def connect(settings: Settings) -> psycopg.Connection:
-    """Open an autocommit connection that returns rows as dicts."""
+    """Open an autocommit connection (UTC, 15 s statement timeout) that returns rows as dicts."""
     return psycopg.connect(
         host=settings.db_host,
         port=settings.db_port,
@@ -36,6 +40,7 @@ def connect(settings: Settings) -> psycopg.Connection:
         password=settings.db_pass,
         sslmode="prefer" if settings.is_local else "require",
         connect_timeout=15,
+        options=CONNECTION_OPTIONS,
         autocommit=True,
         row_factory=dict_row,
     )
@@ -67,7 +72,8 @@ def run_with_retry(
 
     Aurora Serverless v2 pauses at zero capacity and a warm container's connection can go
     stale, so the first failure reconnects and runs the work again. Any other error, or a
-    second OperationalError, propagates.
+    second OperationalError, propagates. A query the server cancelled for running past
+    ``statement_timeout`` is never retried: it would only time out again.
     """
 
     def attempt() -> T:
@@ -79,6 +85,8 @@ def run_with_retry(
 
     try:
         return attempt()
+    except psycopg.errors.QueryCanceled:
+        raise
     except psycopg.OperationalError as exc:
         logger.warning(
             "database unavailable (%s); reconnecting and retrying once", type(exc).__name__
@@ -87,9 +95,16 @@ def run_with_retry(
     return attempt()
 
 
-def schema_checksum() -> str:
-    """SHA-256 of schema.sql, stored in schema_meta once that schema is applied."""
-    return hashlib.sha256(SCHEMA_PATH.read_bytes()).hexdigest()
+def schema_checksum(settings: Settings) -> str:
+    """The fingerprint stored in schema_meta once the schema and seed step has run.
+
+    It covers schema.sql and a SHA-256 of SEED_PASSWORD (never the password itself), so
+    both a schema change and a rotated demo password run the step on the next cold start.
+    """
+    seed_digest = hashlib.sha256((settings.seed_password or "").encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(SCHEMA_PATH.read_bytes())
+    digest.update(b"\nseed-password-sha256:" + seed_digest.encode("ascii"))
+    return digest.hexdigest()
 
 
 _CHECKSUM_SQL = "SELECT checksum FROM schema_meta WHERE id = 1"
@@ -118,7 +133,7 @@ def _apply_schema(conn: psycopg.Connection, settings: Settings, checksum: str) -
     conn.execute("SELECT pg_advisory_xact_lock(%s)", (SCHEMA_LOCK_KEY,))
     if _stored_checksum_in_transaction(conn) == checksum:
         return  # another container applied it while this one waited for the lock
-    logger.info("applying schema.sql and seeding empty tables")
+    logger.info("applying schema.sql, seeding empty tables and syncing the demo users")
     conn.execute(SCHEMA_PATH.read_text(encoding="utf-8"))
     seed.run(conn, settings)
     conn.execute(
@@ -132,14 +147,14 @@ def ensure_schema(settings: Settings) -> None:
     """Make sure schema.sql is applied and demo data seeded, at most once per container.
 
     After the first success a container makes no queries here. A cold start against a
-    current database costs one autocommit SELECT. Otherwise the schema is applied and the
-    seed run in one transaction under ``pg_advisory_xact_lock``, so concurrent cold
-    starts apply it once.
+    current database costs one autocommit SELECT. Otherwise (the schema or SEED_PASSWORD
+    changed) the schema is applied and the seed run in one transaction under
+    ``pg_advisory_xact_lock``, so concurrent cold starts apply it once.
     """
     global _schema_ready
     if _schema_ready:
         return
-    checksum = schema_checksum()
+    checksum = schema_checksum(settings)
     if run_with_retry(settings, _stored_checksum, transaction=False) != checksum:
         run_with_retry(settings, lambda conn: _apply_schema(conn, settings, checksum))
     _schema_ready = True

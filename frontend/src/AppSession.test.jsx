@@ -83,4 +83,15 @@ describe('an expired session', () => {
     expect(refreshCalls(fetchMock).length).toBeGreaterThan(0);
     expect(screen.queryByRole('link', { name: 'Customer Portal Revamp' })).not.toBeInTheDocument();
   });
+
+  it('tells the user their session ended (phase 6, F5)', async () => {
+    stubApi(() => json(401, {
+      error: { code: 'token_revoked', message: 'This session has ended. Sign in again.', details: [] },
+    }));
+
+    render(<TestProviders initialEntries={['/projects']}><AppRoutes /></TestProviders>);
+
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
+    expect(screen.getByText('Your session ended. Sign in again.')).toBeInTheDocument();
+  });
 });

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { Link as RouterLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import AppBar from '@mui/material/AppBar';
 import Box from '@mui/material/Box';
@@ -11,21 +11,28 @@ import ListItem from '@mui/material/ListItem';
 import ListItemButton from '@mui/material/ListItemButton';
 import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
+import Menu from '@mui/material/Menu';
+import MenuItem from '@mui/material/MenuItem';
 import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
+import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import FolderIcon from '@mui/icons-material/Folder';
 import GroupsIcon from '@mui/icons-material/Groups';
+import KeyIcon from '@mui/icons-material/Key';
 import LogoutIcon from '@mui/icons-material/Logout';
 import MenuIcon from '@mui/icons-material/Menu';
 import { useAuth } from '../context/auth-context';
 import { useIsDesktop } from '../hooks/useIsDesktop';
 import { ROLE_LABELS } from '../utils/permissions';
+import ChangePasswordDialog from './ChangePasswordDialog';
+import PageLoading from './PageLoading';
 
 const DRAWER_WIDTH = 240;
 const MAIN_ID = 'main-content';
 const NAV_ID = 'main-navigation';
+const ACCOUNT_MENU_ID = 'account-menu';
 
 /** Navigation items and the permission each one needs. */
 const NAV_ITEMS = [
@@ -42,6 +49,8 @@ function isActive(item, pathname) {
 /**
  * The signed-in shell: app bar, navigation drawer (permanent on desktop, a menu on phones) and
  * the main landmark that pages render into. Navigation the role cannot use is not rendered.
+ * The account menu (the user's name, or an account icon on phones) holds "Change password";
+ * Sign out ends the user's sessions through the API and then forgets the tokens.
  *
  * @returns {JSX.Element} The layout with the current page.
  */
@@ -49,12 +58,25 @@ export default function AppLayout() {
   const { user, role, logout, can } = useAuth();
   const isDesktop = useIsDesktop();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [accountAnchor, setAccountAnchor] = useState(null);
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const { pathname } = useLocation();
   const navigate = useNavigate();
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    setSigningOut(true);
+    await logout();
     navigate('/login', { replace: true });
+  };
+
+  const accountMenuProps = {
+    color: 'inherit',
+    'aria-label': `Account menu for ${user?.full_name ?? 'you'}`,
+    'aria-haspopup': 'menu',
+    'aria-controls': accountAnchor ? ACCOUNT_MENU_ID : undefined,
+    'aria-expanded': accountAnchor ? 'true' : undefined,
+    onClick: (event) => setAccountAnchor(event.currentTarget),
   };
 
   // HashRouter owns the URL hash, so the skip link moves focus itself instead of using #id.
@@ -135,11 +157,31 @@ export default function AppLayout() {
           <Typography variant="h6" component="p" noWrap sx={{ flexGrow: 1, minWidth: 0 }}>
             ACME Project Tracker
           </Typography>
-          {isDesktop && (
-            <Typography variant="body2" component="span" noWrap>
-              {user?.full_name}
-            </Typography>
+          {isDesktop ? (
+            <Button {...accountMenuProps} startIcon={<AccountCircleIcon />} sx={{ minWidth: 0, maxWidth: 280 }}>
+              <Typography variant="body2" component="span" noWrap>{user?.full_name}</Typography>
+            </Button>
+          ) : (
+            <IconButton {...accountMenuProps}>
+              <AccountCircleIcon />
+            </IconButton>
           )}
+          <Menu
+            id={ACCOUNT_MENU_ID}
+            anchorEl={accountAnchor}
+            open={Boolean(accountAnchor)}
+            onClose={() => setAccountAnchor(null)}
+          >
+            <MenuItem
+              onClick={() => {
+                setAccountAnchor(null);
+                setChangingPassword(true);
+              }}
+            >
+              <ListItemIcon><KeyIcon fontSize="small" aria-hidden="true" /></ListItemIcon>
+              Change password
+            </MenuItem>
+          </Menu>
           <Chip
             label={roleLabel}
             size="small"
@@ -147,11 +189,17 @@ export default function AppLayout() {
             sx={{ bgcolor: 'rgba(255, 255, 255, 0.18)', color: 'common.white' }}
           />
           {isDesktop ? (
-            <Button color="inherit" startIcon={<LogoutIcon />} onClick={handleLogout}>
+            <Button color="inherit" startIcon={<LogoutIcon />} onClick={handleLogout} disabled={signingOut}>
               Sign out
             </Button>
           ) : (
-            <IconButton color="inherit" edge="end" aria-label="Sign out" onClick={handleLogout}>
+            <IconButton
+              color="inherit"
+              edge="end"
+              aria-label="Sign out"
+              onClick={handleLogout}
+              disabled={signingOut}
+            >
               <LogoutIcon />
             </IconButton>
           )}
@@ -187,8 +235,12 @@ export default function AppLayout() {
         sx={{ flexGrow: 1, minWidth: 0, p: { xs: 2, md: 3 }, '&:focus': { outline: 'none' } }}
       >
         <Toolbar />
-        <Outlet />
+        {/* The shell stays on screen while a page's code loads. */}
+        <Suspense fallback={<PageLoading />}>
+          <Outlet />
+        </Suspense>
       </Box>
+      <ChangePasswordDialog open={changingPassword} onClose={() => setChangingPassword(false)} />
     </Box>
   );
 }

@@ -1,0 +1,83 @@
+name: Tests
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend (ruff, bandit, pytest)
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.10 is what the host tools run, 3.13 is the Lambda runtime
+        python-version: ['3.10', '3.13']
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres123
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    steps:
+      # With the history (the default is the last commit only): once a schema change is
+      # committed, test_schema_migration.py migrates from the schema of HEAD^ or, when
+      # HEAD^ did not touch it, of an earlier commit. Without that commit the tests fail.
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # Creates its own virtual environment, then runs ruff, bandit and pytest with coverage
+      # against the PostgreSQL service above (it creates and resets the acme_test database)
+      - name: Lint, scan and test the backend
+        run: ./bin/test-backend.sh
+        env:
+          PYTHON: python
+          PGPASSWORD: postgres123
+
+  frontend:
+    name: Frontend (lint, tests with coverage, build)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install the locked dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test with coverage
+        run: npm run test:coverage
+
+      - name: Build
+        run: npm run build

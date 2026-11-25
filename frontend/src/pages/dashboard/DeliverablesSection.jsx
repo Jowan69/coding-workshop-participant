@@ -3,6 +3,7 @@ import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
 import Typography from '@mui/material/Typography';
 import EventBusyIcon from '@mui/icons-material/EventBusy';
+import AsOfNote from '../../components/AsOfNote';
 import DataList from '../../components/DataList';
 import InsightSection from '../../components/InsightSection';
 import ProgressBar from '../../components/ProgressBar';
@@ -99,14 +100,17 @@ export default function DeliverablesSection() {
       emptyMessage="No open projects, so no deliverables to track."
     >
       {(data) => (
-        <DataList
-          ariaLabel="Deliverable progress"
-          columns={COLUMNS}
-          rows={data.items}
-          getRowId={(project) => project.project_id}
-          getRowHref={(project) => `/projects/${project.project_id}?tab=deliverables`}
-          emptyState={{ title: 'No open projects' }}
-        />
+        <>
+          <DataList
+            ariaLabel="Deliverable progress"
+            columns={COLUMNS}
+            rows={data.items}
+            getRowId={(project) => project.project_id}
+            getRowHref={(project) => `/projects/${project.project_id}?tab=deliverables`}
+            emptyState={{ title: 'No open projects' }}
+          />
+          <AsOfNote date={data.as_of} />
+        </>
       )}
     </InsightSection>
   );

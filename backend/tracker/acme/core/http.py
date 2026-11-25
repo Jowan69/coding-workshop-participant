@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("acme.http")
 
 API_PREFIX = "/api/tracker"
+MAX_BODY_BYTES = 256 * 1024  # far above any real request to this API
 
 # Minimum role per HTTP method (CLAUDE.md); a route may override it (/auth/users: admin)
 ROLE_FOR_METHOD = {
@@ -87,6 +88,13 @@ class Conflict(ApiError):
     code = "conflict"
 
 
+class PayloadTooLarge(ApiError):
+    """413: the request body is larger than the API accepts."""
+
+    status = 413
+    code = "payload_too_large"
+
+
 def error_body(code: str, message: str, details: list[dict[str, str]] | None = None) -> dict:
     """Return the error envelope every failed response uses."""
     return {"error": {"code": code, "message": message, "details": details or []}}
@@ -109,10 +117,11 @@ class Request:
 
 @dataclass
 class Response:
-    """A JSON response before it is encoded for Lambda."""
+    """A JSON response before it is encoded for Lambda; ``headers`` adds to the defaults."""
 
     status: int
     body: Any = None
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 def ok(body: Any) -> Response:
@@ -142,6 +151,7 @@ def parse_event(event: dict[str, Any]) -> Request:
 
     Raises:
         BadRequest: If the body is not valid base64 or not valid JSON.
+        PayloadTooLarge: If the body is larger than ``MAX_BODY_BYTES``.
     """
     method, raw_path = _method_and_path(event)
     headers = {str(key).lower(): str(value) for key, value in (event.get("headers") or {}).items()}
@@ -179,17 +189,28 @@ def _parse_body(event: dict[str, Any]) -> Any:
     raw = event.get("body")
     if not raw:
         return None
+    too_large = PayloadTooLarge(
+        f"Request body is larger than {MAX_BODY_BYTES // 1024} KB", code="payload_too_large"
+    )
     if event.get("isBase64Encoded"):
+        if len(raw) > MAX_BODY_BYTES * 4 // 3 + 4:  # base64 is 4 characters per 3 bytes
+            raise too_large
         try:
             raw = base64.b64decode(raw, validate=True).decode("utf-8")
         except (binascii.Error, UnicodeDecodeError) as exc:
             raise BadRequest(
                 "Request body is not valid base64-encoded UTF-8", code="malformed_body"
             ) from exc
+    if len(raw) > MAX_BODY_BYTES or len(raw.encode("utf-8")) > MAX_BODY_BYTES:
+        raise too_large
     if not raw.strip():
         return None
     try:
         return json.loads(raw, parse_float=Decimal, parse_constant=_reject_constant)
+    except RecursionError as exc:
+        raise BadRequest(
+            "Request body is not valid JSON: it is nested too deeply", code="malformed_json"
+        ) from exc
     except ValueError as exc:
         reason = exc.msg if isinstance(exc, json.JSONDecodeError) else str(exc)
         message = f"Request body is not valid JSON: {reason}"
@@ -208,6 +229,7 @@ class Route:
     pattern: re.Pattern[str]
     handler: Handler
     min_role: str | None  # None means public
+    idempotent: bool = True  # POST only: honour an Idempotency-Key header
 
 
 class Router:
@@ -225,11 +247,18 @@ class Router:
         *,
         role: str | None = None,
         public: bool = False,
+        idempotent: bool = True,
     ) -> None:
-        """Register a route; the role defaults from the method unless ``public`` is set."""
+        """Register a route; the role defaults from the method unless ``public`` is set.
+
+        ``idempotent=False`` makes a POST ignore Idempotency-Key: for routes whose
+        response holds tokens, which must never be stored for replay.
+        """
         method = method.upper()
         min_role = None if public else (role or ROLE_FOR_METHOD[method])
-        self.routes.append(Route(method, template, _compile(template), handler, min_role))
+        self.routes.append(
+            Route(method, template, _compile(template), handler, min_role, idempotent)
+        )
 
     def match(self, method: str, path: str) -> tuple[Route, dict[str, int]] | None:
         """Return the first route matching method and path, with its integer params."""
@@ -250,7 +279,8 @@ def _compile(template: str) -> re.Pattern[str]:
     return re.compile("^/" + "/".join(parts) + "/?$")
 
 
-def _json_default(value: Any) -> Any:
+def json_default(value: Any) -> Any:
+    """``json.dumps`` hook: money as numbers, dates and timestamps as ISO 8601 text."""
     if isinstance(value, Decimal):
         return float(value)
     if isinstance(value, (datetime, date)):
@@ -260,20 +290,30 @@ def _json_default(value: Any) -> Any:
 
 def to_lambda(response: Response) -> dict[str, Any]:
     """Encode a Response in the shape a Function URL expects."""
-    headers = {"Content-Type": "application/json"}
+    # no-store: answers hold personal and business data, and none may be served from a cache
+    headers = {"Content-Type": "application/json", "Cache-Control": "no-store", **response.headers}
     if response.status == 204:
         return {"statusCode": 204, "headers": headers, "body": ""}
-    body = json.dumps(response.body, default=_json_default)
+    body = json.dumps(response.body, default=json_default)
     return {"statusCode": response.status, "headers": headers, "body": body}
 
 
 def _from_database_error(exc: Exception, method: str) -> Response | None:
-    """Map integrity and data errors that slipped past validation to client errors."""
+    """Map integrity and data errors that slipped past validation to client errors.
+
+    A query the server cancelled for exceeding ``statement_timeout`` is a 503: the request
+    was fine, the database was too slow, and the client may try again.
+    """
+    if isinstance(exc, pg_errors.QueryCanceled):
+        body = error_body("query_timeout", "The database took too long to answer. Try again.")
+        return Response(503, body, {"Retry-After": "5"})
     if isinstance(exc, pg_errors.UniqueViolation):
         table = exc.diag.table_name or ""
         constraint = exc.diag.constraint_name or ""
         if constraint.endswith("_key"):
+            # projects_name_key -> name; projects_name_lower_key (unique on lower(name)) -> name
             column = constraint.removeprefix(table + "_").removesuffix("_key")
+            column = column.removesuffix("_lower")
             details = [{"field": column, "message": "already exists"}]
             message = f"That {column} is already in use"
             return Response(409, error_body("duplicate", message, details))
@@ -293,11 +333,15 @@ def dispatch(event: dict[str, Any], router: Router, settings: Settings) -> dict[
 
     Order: parse, ensure the schema, match the route, authenticate (unless the route is
     public), check the role, then run the handler inside one database transaction.
+    Authenticating verifies the token and then re-reads the user row, so the role, the
+    active flag and revocation always come from the database, never from the token. A user
+    who must change a temporary password is held to the routes that let them do so. A
+    POST from a signed-in user that carries an Idempotency-Key header runs at most once.
     Unknown paths answer 401 without a valid token and 404 with one. Every request logs
     one line: method, path, status, duration and user id.
     """
-    # Imported here because auth and db (via the seed) import this module's error classes.
-    from acme.core import auth, db
+    # Imported here because these modules import this module's error classes.
+    from acme.core import auth, db, idempotency
 
     started = time.perf_counter()
     method, raw_path = _method_and_path(event)
@@ -308,16 +352,22 @@ def dispatch(event: dict[str, Any], router: Router, settings: Settings) -> dict[
         db.ensure_schema(settings)
         match = router.match(request.method, request.path)
         if match is None or match[0].min_role is not None:
-            request.user = auth.authenticate(request.headers, settings)
-            user_id = request.user["id"]
+            identity = auth.authenticate(request.headers, settings)
+            user_id = identity["id"]
+            request.user = db.run_with_retry(
+                settings, lambda conn: auth.current_user(conn, identity), transaction=False
+            )
         if match is None:
             raise NotFound(f"No route for {request.method} {request.path}", code="route_not_found")
         route, request.params = match
         if route.min_role is not None:
+            auth.require_password_changed(request.user, route.method, route.template)
             auth.require_role(request, route.min_role)
 
         def work(conn: psycopg.Connection) -> Response:
             request.db = conn
+            if route.method == "POST" and route.idempotent and request.user is not None:
+                return idempotency.run_once(request, route.handler)
             return route.handler(request)
 
         response = db.run_with_retry(settings, work)

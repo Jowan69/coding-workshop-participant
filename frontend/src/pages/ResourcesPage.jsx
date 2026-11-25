@@ -24,8 +24,11 @@ const CLOSED = { open: false, record: null };
 
 function NameCell({ person }) {
   return (
-    <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
-      <span>{person.full_name}</span>
+    <Box
+      component="span"
+      sx={{ display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', gap: 1, maxWidth: '100%' }}
+    >
+      <Box component="span" sx={{ minWidth: 0 }}>{person.full_name}</Box>
       {!person.is_active && <StatusChip status="inactive" />}
     </Box>
   );
@@ -36,9 +39,14 @@ NameCell.propTypes = {
 };
 
 const COLUMNS = [
-  { key: 'full_name', label: 'Name', render: (person) => <NameCell person={person} /> },
+  {
+    key: 'full_name',
+    label: 'Name',
+    sortKey: 'full_name',
+    render: (person) => <NameCell person={person} />,
+  },
   { key: 'job_title', label: 'Job title' },
-  { key: 'department', label: 'Department' },
+  { key: 'department', label: 'Department', sortKey: 'department' },
   {
     key: 'allocation_today_pct',
     label: 'Allocated today',
@@ -59,8 +67,10 @@ export default function ResourcesPage() {
   const canDelete = can('delete');
   const filters = useFilterParams(FILTER_NAMES);
   const clearFilters = useClearFilters(FILTER_NAMES);
-  const list = useApiList('/resources', filters);
-  const { create, update, remove } = useApiMutation('/resources', { label: 'Person' });
+  const list = useApiList('/resources', filters, { columns: COLUMNS, defaultSort: 'full_name' });
+  const { create, update, remove, fetchOne } = useApiMutation('/resources', {
+    label: 'Person', onStale: list.reload,
+  });
   const [changes, setChanges] = useState(0);
   const departments = useDepartments('/resources', changes);
   const [form, setForm] = useState(CLOSED);
@@ -84,10 +94,17 @@ export default function ResourcesPage() {
   const openCreate = () => setForm({ open: true, record: null });
   const editing = form.record;
 
-  const handleSave = async (payload) => {
-    if (editing) await update(editing.id, payload);
-    else await create(payload);
+  const handleSave = async (payload, context) => {
+    if (editing) await update(editing.id, payload, undefined, context);
+    else await create(payload, undefined, context);
     afterChange();
+  };
+
+  const reloadEditing = async () => {
+    const fresh = await fetchOne(editing.id);
+    setForm({ open: true, record: fresh });
+    list.reload();
+    return fresh;
   };
 
   const handleDelete = async () => {
@@ -154,6 +171,9 @@ export default function ResourcesPage() {
         rowsPerPage={list.rowsPerPage}
         onPageChange={list.setPage}
         onRowsPerPageChange={list.setRowsPerPage}
+        sort={list.sort}
+        onSortChange={list.setSort}
+        sortChoices={list.sortChoices}
         rowActions={rowActions}
         emptyState={emptyState}
       />
@@ -163,6 +183,8 @@ export default function ResourcesPage() {
           title={editing ? `Edit ${editing.full_name}` : 'Add person'}
           fields={fields}
           initialValues={editing ?? undefined}
+          changesOnly={Boolean(editing)}
+          onReload={editing ? reloadEditing : undefined}
           onSubmit={handleSave}
           onClose={() => setForm((current) => ({ ...current, open: false }))}
           submitLabel={editing ? 'Save changes' : 'Add person'}

@@ -118,8 +118,9 @@ def test_add_and_remove_a_dependency(api, ids) -> None:
     duplicate = api.post(f"/deliverables/{push}/dependencies", {"depends_on_id": contract})
     assert duplicate.status == 409
     link = f"/deliverables/{push}/dependencies/{contract}"
-    assert api.delete(link, role="contributor").status == 403
-    assert api.delete(link, role="manager").status == 204
+    # Phase 6 (F2): unlinking edits a deliverable, so contributors may do it; viewers may not
+    assert api.delete(link, role="viewer").status == 403
+    assert api.delete(link, role="contributor").status == 204
     assert api.delete(link).status == 404
 
 

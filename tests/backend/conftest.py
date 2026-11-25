@@ -193,7 +193,7 @@ def tokens(database: Any) -> dict[str, str]:
     issued = {}
     for role, email in ROLE_EMAILS.items():
         user = connection.execute(
-            "SELECT id, email, role FROM users WHERE email = %s", (email,)
+            "SELECT id, email, role, token_version FROM users WHERE email = %s", (email,)
         ).fetchone()
         issued[role] = auth.issue_tokens(user, database.SETTINGS)["access_token"]
     return issued

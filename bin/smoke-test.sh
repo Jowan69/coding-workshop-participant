@@ -2,15 +2,37 @@
 # Purpose: smoke-test a running tracker API end to end, with curl only
 # Usage:   ./bin/smoke-test.sh [BASE_URL]
 #          BASE_URL defaults to http://localhost:3001 (the dev proxy); in AWS pass the CloudFront URL
-# Env:     SEED_PASSWORD (defaults to the Terraform default demo password)
-# Exit:    0 when every check passes, 1 otherwise
+#          For an https:// URL (CloudFront) it also checks the edge: the security headers, that
+#          the main script is served compressed, and that /projects returns the app's HTML.
+#          SPA_REWRITE=0 skips that last check (deployments with enable_spa_rewrite = false).
+# Env:     SEED_PASSWORD, the demo users' password. Required unless BASE_URL is localhost,
+#          where it falls back to the local stack's value. For AWS:
+#            export SEED_PASSWORD="$(terraform -chdir=infra output -raw demo_password)"
+# Exit:    0 when every check passes, 1 otherwise, 2 without curl or without the password
 
 set -uo pipefail
 
 BASE_URL="${1:-http://localhost:3001}"
 API="${BASE_URL%/}/api/tracker"
-PASSWORD="${SEED_PASSWORD:-AcmeDemo-2026}"
 FAILURES=0
+
+# The demo password comes from $SEED_PASSWORD. Only a local stack has a known default (the
+# LocalStack value in infra/locals.tf); for a deployed API it must be given.
+case "${BASE_URL%/}" in
+    http://localhost | http://localhost:* | http://127.0.0.1 | http://127.0.0.1:*) IS_LOCAL=1 ;;
+    *) IS_LOCAL=0 ;;
+esac
+if [ -n "${SEED_PASSWORD:-}" ]; then
+    PASSWORD="$SEED_PASSWORD"
+elif [ "$IS_LOCAL" = 1 ]; then
+    PASSWORD="AcmeDemo-2026"
+else
+    echo "ERROR: SEED_PASSWORD is not set, and $BASE_URL is not a local stack."
+    echo "       Export the demo password of that deployment first, for example:"
+    echo "         export SEED_PASSWORD=\"\$(terraform -chdir=infra output -raw demo_password)\""
+    echo "       (or the value you deployed with TF_VAR_demo_password)."
+    exit 2
+fi
 BODY_FILE="$(mktemp)"
 trap 'rm -f "$BODY_FILE"' EXIT
 
@@ -57,6 +79,15 @@ echo "Smoke-testing $API"
 
 request GET /health
 expect "GET /health needs no token" 200
+
+# Every API response must forbid caching
+CACHE_CONTROL="$(curl -sS --max-time 30 -o /dev/null -D - "$API/health" 2> /dev/null \
+    | tr -d '\r' | sed -n 's/^[Cc]ache-[Cc]ontrol: *//p' | head -n 1)"
+if [ "$CACHE_CONTROL" = "no-store" ]; then
+    pass "API responses say Cache-Control: no-store"
+else
+    fail "API responses say Cache-Control: no-store" "got '${CACHE_CONTROL:-nothing}'"
+fi
 
 declare -A TOKENS
 for pair in admin@acme.test:admin manager@acme.test:manager lead@acme.test:contributor \
@@ -134,6 +165,61 @@ else
 fi
 request GET /insights/dependencies "$VIEWER"
 expect "GET /insights/dependencies without project_id is a 400" 400
+
+# The edge, for a deployed (https) site only: CloudFront adds these, the local stack does not
+case "$BASE_URL" in
+    https://*)
+        SITE="${BASE_URL%/}"
+        PAGE_HEADERS="$(curl -sS --max-time 30 -o /dev/null -D - "$SITE/" 2> /dev/null | tr -d '\r')"
+        for header in strict-transport-security x-content-type-options x-frame-options \
+                      referrer-policy; do
+            if printf '%s\n' "$PAGE_HEADERS" | grep -qi "^$header:"; then
+                pass "security header $header on the page"
+            else
+                fail "security header $header on the page" "missing"
+            fi
+        done
+        API_HEADERS="$(curl -sS --max-time 30 -o /dev/null -D - "$API/health" 2> /dev/null | tr -d '\r')"
+        if printf '%s\n' "$API_HEADERS" | grep -qi '^strict-transport-security:' \
+            && printf '%s\n' "$API_HEADERS" | grep -qi '^x-content-type-options:'; then
+            pass "security headers on the API"
+        else
+            fail "security headers on the API" "missing"
+        fi
+
+        PAGE="$(curl -sS --max-time 30 "$SITE/" 2> /dev/null)"
+        if [[ "$PAGE" == *'http-equiv="Content-Security-Policy"'* ]]; then
+            pass "index.html carries the Content-Security-Policy"
+        else
+            fail "index.html carries the Content-Security-Policy" "no meta tag"
+        fi
+        SCRIPT="$(printf '%s' "$PAGE" | sed -n 's/.*src="\(\/assets\/[^"]*\.js\)".*/\1/p' | head -n 1)"
+        if [ -z "$SCRIPT" ]; then
+            fail "the main script is served compressed" "no /assets/*.js script in index.html"
+        else
+            ENCODING="$(curl -sS --max-time 30 -o /dev/null -D - -H 'Accept-Encoding: gzip, br' \
+                "$SITE$SCRIPT" 2> /dev/null | tr -d '\r' \
+                | sed -n 's/^[Cc]ontent-[Ee]ncoding: *//p' | head -n 1)"
+            case "$ENCODING" in
+                gzip | br) pass "the main script is served compressed ($ENCODING)" ;;
+                *) fail "the main script is served compressed" "content-encoding '${ENCODING:-none}'" ;;
+            esac
+        fi
+
+        if [ "${SPA_REWRITE:-1}" = "0" ]; then
+            echo "SKIP  /projects returns the app's HTML (SPA_REWRITE=0)"
+        else
+            DEEP="$(curl -sS --max-time 30 -o "$BODY_FILE" -w '%{http_code} %{content_type}' \
+                "$SITE/projects" 2> /dev/null)" || DEEP="000 "
+            if [ "${DEEP%% *}" = 200 ] && [[ "${DEEP#* }" == text/html* ]] \
+                && grep -q '<div id="root">' "$BODY_FILE"; then
+                pass "/projects returns the app's HTML"
+            else
+                fail "/projects returns the app's HTML" "got $DEEP"
+            fi
+        fi
+        ;;
+esac
 
 echo
 if [ "$FAILURES" -gt 0 ]; then

@@ -6,7 +6,8 @@ export const NotificationContext = createContext(null);
 /**
  * Show a short snackbar message.
  *
- * @returns {(message: string, severity?: 'success'|'info'|'warning'|'error') => void} notify.
+ * @returns {(message: string, severity?: 'success'|'info'|'warning'|'error',
+ *   options?: {action?: {label: string, onClick: () => void}}) => void} notify.
  */
 export function useNotify() {
   const value = useContext(NotificationContext);

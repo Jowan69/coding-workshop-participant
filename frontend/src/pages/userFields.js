@@ -1,3 +1,4 @@
+import { PASSWORD_MAX, PASSWORD_RULES, passwordProblem } from '../utils/passwordRules';
 import { ROLE_OPTIONS } from '../utils/permissions';
 
 /**
@@ -14,10 +15,9 @@ export function userFields() {
       label: 'Temporary password',
       type: 'password',
       required: true,
-      minLength: 8,
-      maxLength: 128,
-      half: true,
-      helperText: '8 to 128 characters; share it with them securely',
+      maxLength: PASSWORD_MAX,
+      helperText: `${PASSWORD_RULES} Share it with them securely.`,
+      validate: (value) => passwordProblem(value, 'Temporary password'),
     },
     {
       name: 'role',
@@ -26,7 +26,6 @@ export function userFields() {
       required: true,
       options: ROLE_OPTIONS,
       defaultValue: 'viewer',
-      half: true,
     },
   ];
 }

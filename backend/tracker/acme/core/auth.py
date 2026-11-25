@@ -8,12 +8,15 @@ import hashlib
 import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import jwt
 
 from acme.core.config import Settings
 from acme.core.http import Forbidden, Request, Unauthorized
+
+if TYPE_CHECKING:
+    import psycopg
 
 ROLES = ("viewer", "contributor", "manager", "admin")
 ROLE_RANK = {role: rank for rank, role in enumerate(ROLES)}
@@ -24,6 +27,17 @@ JWT_ALGORITHM = "HS256"
 AUTH_SCHEME = "Bearer"
 TYP_ACCESS = "access"
 TYP_REFRESH = "refresh"
+
+# The only routes a user with a temporary password may call until they change it
+PASSWORD_CHANGE_ROUTES = frozenset(
+    {("GET", "/auth/me"), ("POST", "/auth/change-password"), ("POST", "/auth/logout")}
+)
+
+# One primary-key lookup per authenticated request
+_USER_STATE_QUERY = (
+    "SELECT id, email, role, is_active, token_version, must_change_password "
+    "FROM users WHERE id = %s"
+)
 
 # scrypt cost: 2**14 * 8 * 128 bytes = 16 MiB of memory per hash, about 50 ms
 _SCRYPT_N = 2**14
@@ -85,19 +99,27 @@ def burn_password_check(plain: str) -> None:
 def issue_tokens(
     user: dict[str, Any], settings: Settings, now: datetime | None = None
 ) -> dict[str, Any]:
-    """Issue a 30-minute access token and a 7-day refresh token for a user row."""
+    """Issue a 30-minute access token and a 7-day refresh token for a user row.
+
+    Both carry the row's ``token_version`` as the claim ``ver``; a token whose ``ver`` no
+    longer matches the row is revoked. The access token's ``role`` and ``email`` claims
+    are informational: authorisation always uses the database row.
+    """
     now = now or datetime.now(timezone.utc)
+    version = int(user.get("token_version", 0))
     access_claims = {
         "sub": str(user["id"]),
         "role": user["role"],
         "email": user["email"],
         "typ": TYP_ACCESS,
+        "ver": version,
         "iat": now,
         "exp": now + ACCESS_TTL,
     }
     refresh_claims = {
         "sub": str(user["id"]),
         "typ": TYP_REFRESH,
+        "ver": version,
         "iat": now,
         "exp": now + REFRESH_TTL,
     }
@@ -110,33 +132,40 @@ def issue_tokens(
 
 
 def decode_token(encoded: str, settings: Settings, expected_typ: str) -> dict[str, Any]:
-    """Verify signature, expiry and ``typ``, and return the claims.
+    """Verify signature, expiry, ``typ`` and the presence of ``ver``, and return the claims.
 
     Raises:
         Unauthorized: ``token_expired`` when expired, ``invalid_token`` for anything else,
-            including a refresh token used where an access token is expected.
+            including a refresh token used where an access token is expected and a token
+            without a version (issued before revocation existed).
     """
     try:
         claims = jwt.decode(
             encoded,
             settings.jwt_secret,
             algorithms=[JWT_ALGORITHM],
-            options={"require": ["exp", "iat", "sub", "typ"]},
+            options={"require": ["exp", "iat", "sub", "typ", "ver"]},
         )
     except jwt.ExpiredSignatureError as exc:
         raise Unauthorized("Token has expired", code="token_expired") from exc
     except jwt.InvalidTokenError as exc:
         raise Unauthorized("Token is invalid", code="invalid_token") from exc
     if claims.get("typ") != expected_typ:
-        raise Unauthorized(f"Expected an {expected_typ} token", code="invalid_token")
+        article = "an" if expected_typ[:1] in "aeiou" else "a"
+        raise Unauthorized(f"Expected {article} {expected_typ} token", code="invalid_token")
+    if isinstance(claims["ver"], bool) or not isinstance(claims["ver"], int):
+        raise Unauthorized("Token is invalid", code="invalid_token")
     return claims
 
 
 def authenticate(headers: dict[str, str], settings: Settings) -> dict[str, Any]:
-    """Read the Bearer access token from lower-cased headers and return the caller.
+    """Read the Bearer access token from lower-cased headers and return who it names.
+
+    This only proves the token is ours and unexpired. ``current_user()`` then loads the
+    row, which decides the role and whether the token is still good.
 
     Returns:
-        ``{"id": int, "role": str, "email": str}`` taken from the token.
+        ``{"id": int, "role": str, "email": str, "ver": int}`` taken from the token.
 
     Raises:
         Unauthorized: If the header is missing or the token is not a valid access token.
@@ -147,7 +176,56 @@ def authenticate(headers: dict[str, str], settings: Settings) -> dict[str, Any]:
     claims = decode_token(credentials.strip(), settings, TYP_ACCESS)
     if claims.get("role") not in ROLE_RANK or not str(claims["sub"]).isdigit():
         raise Unauthorized("Token is invalid", code="invalid_token")
-    return {"id": int(claims["sub"]), "role": claims["role"], "email": claims.get("email")}
+    return {
+        "id": int(claims["sub"]),
+        "role": claims["role"],
+        "email": claims.get("email"),
+        "ver": claims["ver"],
+    }
+
+
+def current_user(conn: psycopg.Connection, identity: dict[str, Any]) -> dict[str, Any]:
+    """Re-read the user a verified token names: the database decides, not the token.
+
+    Args:
+        conn: Database connection.
+        identity: What ``authenticate()`` returned.
+
+    Returns:
+        ``{"id", "role", "email", "must_change_password"}`` from the user row.
+
+    Raises:
+        Unauthorized: ``invalid_token`` when the user was deleted or deactivated,
+            ``token_revoked`` when the token's version is not the row's.
+    """
+    row = conn.execute(_USER_STATE_QUERY, (identity["id"],)).fetchone()
+    if row is None or not row["is_active"]:
+        raise Unauthorized("This account no longer exists or is inactive", code="invalid_token")
+    if identity["ver"] != row["token_version"]:
+        raise Unauthorized("This session has ended. Sign in again.", code="token_revoked")
+    return {
+        "id": row["id"],
+        "role": row["role"],
+        "email": row["email"],
+        "must_change_password": row["must_change_password"],
+    }
+
+
+def require_password_changed(user: dict[str, Any] | None, method: str, template: str) -> None:
+    """Hold a user with a temporary password to the routes that let them replace it.
+
+    The dispatcher calls this for every route that needs a token. ``POST /auth/refresh``
+    is public, so its handler calls it with the user the refresh token names.
+
+    Raises:
+        Forbidden: ``password_change_required`` for any other route.
+    """
+    if user and user.get("must_change_password"):
+        if (method, template) not in PASSWORD_CHANGE_ROUTES:
+            raise Forbidden(
+                "Change your temporary password before doing anything else",
+                code="password_change_required",
+            )
 
 
 def has_role(role: str, minimum: str) -> bool:

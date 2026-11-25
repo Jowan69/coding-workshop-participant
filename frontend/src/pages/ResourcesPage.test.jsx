@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import TestProviders from '../TestProviders';
-import { request } from '../services/apiClient';
+import { ApiError, request } from '../services/apiClient';
 import { clearSession, setSession } from '../services/session';
 import ResourcesPage from './ResourcesPage';
 
@@ -163,6 +163,7 @@ describe('ResourcesPage', () => {
     await waitFor(() => expect(request).toHaveBeenCalledWith('/resources', {
       method: 'POST',
       body: { full_name: 'Dana Lee', email: 'dana@acme.test', capacity_pct: 100, is_active: true },
+      idempotencyKey: expect.any(String), // phase 6 (D2)
     }));
     expect(await screen.findByText('Person created')).toBeInTheDocument();
   });
@@ -179,7 +180,7 @@ describe('ResourcesPage', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => expect(request).toHaveBeenCalledWith('/resources/12', expect.objectContaining({
-      method: 'PUT', body: expect.objectContaining({ is_active: false, capacity_pct: 100 }),
+      method: 'PUT', body: { is_active: false }, // phase 6 (D3): only what changed
     })));
   });
 
@@ -194,5 +195,53 @@ describe('ResourcesPage', () => {
     expect(dialog).toHaveTextContent('set their status to Inactive instead');
     await user.click(within(dialog).getByRole('button', { name: 'Delete person' }));
     expect(request).toHaveBeenCalledWith('/resources/12', { method: 'DELETE' });
+  });
+});
+
+describe('ResourcesPage sorting (phase 6, F3)', () => {
+  it('sorts by name and department through the API', async () => {
+    signInAs('viewer');
+    const user = userEvent.setup();
+    renderPage();
+    const table = await screen.findByRole('table', { name: 'Team members' });
+    expect(within(table).getByRole('columnheader', { name: 'Name' })).toHaveAttribute('aria-sort', 'ascending');
+    expect(within(within(table).getByRole('columnheader', { name: 'Job title' })).queryByRole('button'))
+      .not.toBeInTheDocument();
+    await user.click(within(within(table).getByRole('columnheader', { name: 'Department' })).getByRole('button'));
+    await waitFor(() => expect(
+      request.mock.calls
+        .filter(([path, options = {}]) => path === '/resources' && !options.method && options.query?.limit !== 100)
+        .at(-1)[1].query,
+    ).toEqual({ sort: 'department', limit: 10, offset: 0 }));
+  });
+});
+
+describe('ResourcesPage reload after a stale edit (phase 6, D3)', () => {
+  it('says someone else changed the person and reloads them into the form', async () => {
+    signInAs('contributor');
+    const STAMP = '2026-11-24T10:00:00.000000+00:00';
+    const stamped = PEOPLE.map((item) => ({ ...item, updated_at: STAMP }));
+    const fresh = { ...stamped.find((item) => item.id === 12), job_title: 'Staff Engineer', updated_at: '2026-11-24T12:00:00.000000+00:00' };
+    request.mockImplementation(async (path, { method = 'GET', body } = {}) => {
+      if (method === 'PUT') {
+        throw new ApiError({ status: 409, code: 'stale_record', message: 'Changed by someone else.' });
+      }
+      if (path === '/resources/12') return fresh;
+      if (method === 'GET') return { items: stamped, total: stamped.length, limit: 10, offset: 0 };
+      return { id: 99, ...body };
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: 'Edit Ben Carter' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Edit Ben Carter' });
+    await user.type(within(dialog).getByRole('textbox', { name: /^Job title/ }), ' II');
+    await user.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+
+    const alert = await within(dialog).findByRole('alert');
+    expect(alert).toHaveTextContent('This was changed by someone else');
+    await user.click(within(alert).getByRole('button', { name: 'Reload' }));
+    await waitFor(() => expect(within(dialog).getByRole('textbox', { name: /^Job title/ })).toHaveValue('Staff Engineer'));
+    const put = request.mock.calls.find(([, options = {}]) => options.method === 'PUT');
+    expect(put[1].body.expected_updated_at).toBe(STAMP);
   });
 });

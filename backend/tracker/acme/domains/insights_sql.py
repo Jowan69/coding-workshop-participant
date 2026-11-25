@@ -10,6 +10,8 @@ from __future__ import annotations
 from datetime import date
 from typing import TYPE_CHECKING, Any
 
+from acme.domains.dependency_chain import build_chain
+
 if TYPE_CHECKING:
     import psycopg
 
@@ -56,6 +58,7 @@ facts AS (
     CROSS JOIN params pr
     LEFT JOIN counts c ON c.project_id = p.id
     WHERE p.status <> ALL (%(closed)s::text[])
+      AND (%(status)s::text IS NULL OR p.status = %(status)s::text)
 ),
 flags AS (
     SELECT f.*,
@@ -168,48 +171,17 @@ ORDER BY pk.total_pct DESC, pk.full_name, pk.resource_id
 
 _PROJECT_SQL = "SELECT id, name FROM projects WHERE id = %s"
 
-_DEPENDENCY_CHAIN_SQL = """
-WITH RECURSIVE project_deliverables AS (
-    SELECT id, title, status, due_date FROM deliverables WHERE project_id = %(project_id)s
-),
--- Walk upstream from every deliverable. A step never revisits a node already on its path,
--- so the walk ends even if bad data contains a cycle.
-walk (start_id, node_id, depth, path) AS (
-    SELECT pd.id, pd.id, 0, ARRAY[pd.id]
-    FROM project_deliverables pd
-    UNION ALL
-    SELECT w.start_id, dd.depends_on_id, w.depth + 1, w.path || dd.depends_on_id
-    FROM walk w
-    JOIN deliverable_dependencies dd ON dd.deliverable_id = w.node_id
-    JOIN project_deliverables up ON up.id = dd.depends_on_id
-    WHERE dd.depends_on_id <> ALL (w.path)
-),
-per_item AS (
-    SELECT w.start_id AS id, max(w.depth) AS depth,
-           COALESCE(array_agg(DISTINCT w.node_id ORDER BY w.node_id)
-                    FILTER (WHERE w.node_id <> w.start_id), '{}') AS upstream_ids,
-           COALESCE(bool_or(n.status = 'blocked' AND w.node_id <> w.start_id), false)
-               AS blocked_by_upstream
-    FROM walk w
-    JOIN project_deliverables n ON n.id = w.node_id
-    GROUP BY w.start_id
-),
--- The longest upstream path ending at each deliverable, listed from it back to its root.
-deepest AS (
-    SELECT DISTINCT ON (w.start_id) w.start_id AS id, w.path
-    FROM walk w
-    ORDER BY w.start_id, w.depth DESC, w.path
+_PROJECT_DELIVERABLES_SQL = (
+    "SELECT id, title, status, due_date FROM deliverables WHERE project_id = %(project_id)s"
 )
-SELECT pd.id, pd.title, pd.status, pd.due_date, pi.depth, pi.upstream_ids,
-       pi.blocked_by_upstream, dp.path AS chain_to_root,
-       COALESCE((SELECT array_agg(dd.depends_on_id ORDER BY dd.depends_on_id)
-                 FROM deliverable_dependencies dd
-                 JOIN project_deliverables up ON up.id = dd.depends_on_id
-                 WHERE dd.deliverable_id = pd.id), '{}') AS depends_on_ids
-FROM project_deliverables pd
-JOIN per_item pi ON pi.id = pd.id
-JOIN deepest dp ON dp.id = pd.id
-ORDER BY pi.depth, pd.due_date, pd.id
+
+# Links whose two ends are both in the project; a link that leaves it is not followed.
+_PROJECT_DEPENDENCIES_SQL = """
+SELECT dd.deliverable_id, dd.depends_on_id
+FROM deliverable_dependencies dd
+JOIN deliverables d ON d.id = dd.deliverable_id
+JOIN deliverables up ON up.id = dd.depends_on_id
+WHERE d.project_id = %(project_id)s AND up.project_id = %(project_id)s
 """
 
 _BUDGET_SQL = """
@@ -244,7 +216,8 @@ def today(conn: psycopg.Connection) -> date:
 
 
 def project_health(
-    conn: psycopg.Connection, today: date, *, only_at_risk: bool = False
+    conn: psycopg.Connection, today: date, *, only_at_risk: bool = False,
+    status: str | None = None,
 ) -> list[Row]:
     """Health of every open project (status not completed or cancelled), worst first.
 
@@ -265,6 +238,7 @@ def project_health(
         conn: Database connection.
         today: The day to judge on.
         only_at_risk: True returns only projects whose health is not ``on_track``.
+        status: Only projects with this (open) status; None keeps every open project.
 
     Returns:
         One row per project with its facts, the flags ``deadline_passed`` and
@@ -275,6 +249,7 @@ def project_health(
         "slip_points": SLIP_POINTS,
         "closed": list(CLOSED_PROJECT_STATUSES),
         "only_at_risk": only_at_risk,
+        "status": status,
     }
     return conn.execute(_PROJECT_HEALTH_SQL, params).fetchall()
 
@@ -338,8 +313,16 @@ def dependency_chain(conn: psycopg.Connection, project_id: int) -> list[Row]:
     its longest upstream path, from itself back to the root. Only links inside the project
     are followed, and a walk never revisits a deliverable already on its path, so it ends
     even if bad data contains a cycle.
+
+    Two queries (the project's deliverables, the links between them) feed a memoised
+    traversal in ``dependency_chain.build_chain``, so the cost grows with the number of
+    deliverables and links, not with the number of paths through them.
     """
-    return conn.execute(_DEPENDENCY_CHAIN_SQL, {"project_id": project_id}).fetchall()
+    params = {"project_id": project_id}
+    deliverables = conn.execute(_PROJECT_DELIVERABLES_SQL, params).fetchall()
+    links = conn.execute(_PROJECT_DEPENDENCIES_SQL, params).fetchall()
+    edges = [(link["deliverable_id"], link["depends_on_id"]) for link in links]
+    return build_chain(deliverables, edges)
 
 
 def budget_burn(conn: psycopg.Connection, today: date) -> list[Row]:

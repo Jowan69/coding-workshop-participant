@@ -149,8 +149,9 @@ if [ ! -f .env ] && [ -f $BUILD_DIR/.env.local ]; then
     mv -f $BUILD_DIR/.env.local $BUILD_DIR/.env
 fi
 
-# Upload built frontend to S3 (with deletion of old files)
-aws s3 sync $BUILD_DIR/ s3://$BUCKET_NAME/ --delete $AWS_ENDPOINT
+# Upload built frontend to S3: hashed files under assets/ cacheable for a year, index.html and
+# other root files revalidated on every request, files the build no longer has deleted
+$SCRIPT_DIR/upload-frontend.sh "$BUILD_DIR" "$BUCKET_NAME" $AWS_ENDPOINT
 
 # Invalidate CloudFront cache for AWS deployments
 if [ "$ENVIRONMENT" = "aws" ]; then

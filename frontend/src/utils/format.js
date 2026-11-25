@@ -1,5 +1,12 @@
 const EMPTY = '—';
 
+/** The largest money amount the API stores: numeric(14, 2). */
+export const MONEY_MAX = 999999999999.99;
+
+/** The first and last calendar dates the API accepts (API.md, Formats). */
+export const DATE_MIN = '2000-01-01';
+export const DATE_MAX = '2100-12-31';
+
 const dateFormat = new Intl.DateTimeFormat('en-US', {
   year: 'numeric',
   month: 'short',
@@ -10,6 +17,12 @@ const currencyFormat = new Intl.NumberFormat('en-US', {
   style: 'currency',
   currency: 'USD',
   maximumFractionDigits: 0,
+});
+
+const timeFormat = new Intl.DateTimeFormat('en-GB', {
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
 });
 
 const centsFormat = new Intl.NumberFormat('en-US', {
@@ -53,6 +66,16 @@ export function todayIso(now = new Date()) {
 export function formatDate(value) {
   const date = parseDate(value);
   return date ? dateFormat.format(date) : EMPTY;
+}
+
+/**
+ * Format a moment as a 24-hour local time, e.g. "14:05".
+ *
+ * @param {Date|null|undefined} value The moment.
+ * @returns {string} Display text, or an em dash when empty.
+ */
+export function formatTime(value) {
+  return value instanceof Date && !Number.isNaN(value.getTime()) ? timeFormat.format(value) : EMPTY;
 }
 
 /**

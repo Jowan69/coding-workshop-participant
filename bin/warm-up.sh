@@ -5,15 +5,35 @@
 #          projects, printing how long each step took.
 # Usage:   ./bin/warm-up.sh [BASE_URL]
 #          BASE_URL defaults to http://localhost:3001 (the dev proxy); in AWS pass the CloudFront URL
-# Env:     SEED_PASSWORD (defaults to the Terraform default demo password)
+# Env:     SEED_PASSWORD, the demo users' password. Required unless BASE_URL is localhost,
+#          where it falls back to the local stack's value. For AWS:
+#            export SEED_PASSWORD="$(terraform -chdir=infra output -raw demo_password)"
 #          WARMUP_EMAIL (default viewer@acme.test), ATTEMPTS (default 12), DELAY seconds (default 5)
-# Exit:    0 when the API answered an authenticated list, 1 otherwise, 2 without curl
+# Exit:    0 when the API answered an authenticated list, 1 otherwise, 2 without curl or
+#          without the password
 
 set -uo pipefail
 
 BASE_URL="${1:-http://localhost:3001}"
 API="${BASE_URL%/}/api/tracker"
-PASSWORD="${SEED_PASSWORD:-AcmeDemo-2026}"
+
+# The demo password comes from $SEED_PASSWORD. Only a local stack has a known default (the
+# LocalStack value in infra/locals.tf); for a deployed API it must be given.
+case "${BASE_URL%/}" in
+    http://localhost | http://localhost:* | http://127.0.0.1 | http://127.0.0.1:*) IS_LOCAL=1 ;;
+    *) IS_LOCAL=0 ;;
+esac
+if [ -n "${SEED_PASSWORD:-}" ]; then
+    PASSWORD="$SEED_PASSWORD"
+elif [ "$IS_LOCAL" = 1 ]; then
+    PASSWORD="AcmeDemo-2026"
+else
+    echo "ERROR: SEED_PASSWORD is not set, and $BASE_URL is not a local stack."
+    echo "       Export the demo password of that deployment first, for example:"
+    echo "         export SEED_PASSWORD=\"\$(terraform -chdir=infra output -raw demo_password)\""
+    echo "       (or the value you deployed with TF_VAR_demo_password)."
+    exit 2
+fi
 EMAIL="${WARMUP_EMAIL:-viewer@acme.test}"
 ATTEMPTS="${ATTEMPTS:-12}"
 DELAY="${DELAY:-5}"
@@ -66,7 +86,7 @@ request POST /auth/login "" "{\"email\": \"$EMAIL\", \"password\": \"$(json_esca
 TOKEN="$(json_value access_token)"
 printf 'login   %s: HTTP %s in %ss\n' "$EMAIL" "$STATUS" "$SECS"
 if [ "$STATUS" != 200 ] || [ -z "$TOKEN" ]; then
-    echo "FAIL  could not sign in as $EMAIL (set SEED_PASSWORD if the demo password was changed)"
+    echo "FAIL  could not sign in as $EMAIL (is SEED_PASSWORD this deployment's demo password?)"
     exit 1
 fi
 

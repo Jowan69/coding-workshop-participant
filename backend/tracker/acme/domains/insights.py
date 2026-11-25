@@ -14,11 +14,17 @@ from typing import Any
 from acme.core.http import BadRequest, NotFound, Request, Response, Router, ok
 from acme.core.validation import parse_param
 from acme.domains import insights_sql as queries
+from acme.domains.projects import STATUSES as PROJECT_STATUSES
 
 # Fields of a project-health row that every project-status item returns
 STATUS_FIELDS = (
     "id", "name", "department", "status", "start_date", "end_date", "days_to_deadline",
     "deliverables_total", "deliverables_done", "percent_done", "time_elapsed_pct", "health",
+    "forecast_end_date",
+)
+# Statuses /insights/project-status can be narrowed to: the open ones
+OPEN_PROJECT_STATUSES = tuple(
+    status for status in PROJECT_STATUSES if status not in queries.CLOSED_PROJECT_STATUSES
 )
 DELIVERABLE_STATUSES = ("not_started", "in_progress", "blocked", "done")
 BUDGET_FIELDS = (
@@ -68,9 +74,14 @@ def _reasons(row: dict[str, Any]) -> list[dict[str, str]]:
 
 
 def project_status(request: Request) -> Response:
-    """Every open project with status, percent done, days to deadline and health."""
+    """Open projects with status, percent done, days to deadline, health and forecast.
+
+    ``?status=`` narrows the answer to one open status (planned, active or on_hold).
+    """
+    raw = request.query.get("status", "")
+    status = parse_param("status", "enum", raw, OPEN_PROJECT_STATUSES) if raw.strip() else None
     today = queries.today(request.db)
-    rows = queries.project_health(request.db, today)
+    rows = queries.project_health(request.db, today, status=status)
     return ok({"as_of": today, "items": [_pick(row, STATUS_FIELDS) for row in rows]})
 
 
@@ -79,11 +90,7 @@ def at_risk(request: Request) -> Response:
     today = queries.today(request.db)
     rows = queries.project_health(request.db, today, only_at_risk=True)
     items = [
-        {
-            **_pick(row, STATUS_FIELDS),
-            "reasons": _reasons(row),
-            "forecast_end_date": row["forecast_end_date"],
-        }
+        {**_pick(row, STATUS_FIELDS), "reasons": _reasons(row)}
         for row in rows
     ]
     return ok({"as_of": today, "items": items})

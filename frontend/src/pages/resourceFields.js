@@ -1,8 +1,4 @@
-/** The active filter's options; values are what the API's `is_active` filter takes. */
-export const ACTIVE_FILTER_OPTIONS = [
-  { value: 'true', label: 'Active' },
-  { value: 'false', label: 'Inactive' },
-];
+export { ACTIVE_FILTER_OPTIONS } from '../utils/status';
 
 /**
  * The person (resource) form, with the same limits the API enforces (API.md, Resources).

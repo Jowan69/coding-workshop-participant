@@ -3,6 +3,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import EventIcon from '@mui/icons-material/Event';
 import EventBusyIcon from '@mui/icons-material/EventBusy';
 import HourglassBottomIcon from '@mui/icons-material/HourglassBottom';
+import LockClockIcon from '@mui/icons-material/LockClock';
 import MoneyOffIcon from '@mui/icons-material/MoneyOff';
 import PauseCircleIcon from '@mui/icons-material/PauseCircle';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
@@ -37,6 +38,7 @@ export const STATUS_META = {
   over_allocated: { label: 'Over-allocated', color: 'atRisk', icon: WarningAmberIcon },
   user_active: { label: 'Active', color: 'onTrack', icon: CheckCircleIcon },
   inactive: { label: 'Inactive', color: 'default', icon: BlockIcon },
+  locked: { label: 'Locked', color: 'atRisk', icon: LockClockIcon },
 };
 
 /**
@@ -57,6 +59,12 @@ export const PROJECT_STATUS_OPTIONS = ['planned', 'active', 'on_hold', 'complete
 /** Deliverable statuses in workflow order, as select options. */
 export const DELIVERABLE_STATUS_OPTIONS = ['not_started', 'in_progress', 'blocked', 'done']
   .map((value) => ({ value, label: STATUS_META[value].label }));
+
+/** The active filter's options; values are what the API's `is_active` filter takes. */
+export const ACTIVE_FILTER_OPTIONS = [
+  { value: 'true', label: 'Active' },
+  { value: 'false', label: 'Inactive' },
+];
 
 /**
  * Human label for a status key, falling back to the key with underscores turned into spaces.

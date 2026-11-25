@@ -192,12 +192,12 @@ beforeEach(() => {
 const SECTIONS = [
   {
     Component: ProjectStatusSection,
-    heading: 'Where does each project stand?',
+    heading: 'What is the status of each active project?',
     path: '/insights/project-status',
     label: 'project status',
     shows: 'Data Center Migration',
     empty: { as_of: AS_OF, items: [] },
-    emptyText: 'No open projects. Planned, active and on-hold projects appear here.',
+    emptyText: 'No active projects.',
   },
   {
     Component: AtRiskSection,
@@ -307,6 +307,90 @@ describe('ProjectStatusSection', () => {
     const study = within(table).getByRole('row', { name: /Market Expansion Study/ });
     expect(within(study).getByText('No deliverables')).toBeInTheDocument();
     expect(within(study).getByText('On track')).toBeInTheDocument();
+  });
+});
+
+describe('ProjectStatusSection status toggle and forecast', () => {
+  const lastQuery = () => callsTo('/insights/project-status').at(-1)[1].query;
+
+  it('asks for active projects first and for another status when toggled', async () => {
+    const user = userEvent.setup();
+    useRoutes();
+    renderSection(ProjectStatusSection);
+    await screen.findByRole('table', { name: 'Project status' });
+    expect(lastQuery()).toEqual({ status: 'active' });
+    const toggle = screen.getByRole('group', { name: 'Projects to show' });
+    expect(within(toggle).getByRole('button', { name: 'Active' })).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(within(toggle).getByRole('button', { name: 'Planned' }));
+    await waitFor(() => expect(lastQuery()).toEqual({ status: 'planned' }));
+    expect(within(toggle).getByRole('button', { name: 'Planned' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText(/^Showing planned projects/)).toBeInTheDocument();
+
+    await user.click(within(toggle).getByRole('button', { name: 'On hold' }));
+    await waitFor(() => expect(lastQuery()).toEqual({ status: 'on_hold' }));
+    await user.click(within(toggle).getByRole('button', { name: 'All open' }));
+    await waitFor(() => expect(lastQuery()).toEqual({ status: '' }));
+  });
+
+  it('keeps one choice selected when the selected one is clicked again', async () => {
+    const user = userEvent.setup();
+    useRoutes();
+    renderSection(ProjectStatusSection);
+    await screen.findByRole('table', { name: 'Project status' });
+    const active = screen.getByRole('button', { name: 'Active' });
+    await user.click(active);
+    expect(active).toHaveAttribute('aria-pressed', 'true');
+    expect(callsTo('/insights/project-status')).toHaveLength(1);
+  });
+
+  it('names the status in the empty message', async () => {
+    const user = userEvent.setup();
+    useRoutes({ '/insights/project-status': () => ({ as_of: AS_OF, items: [] }) });
+    renderSection(ProjectStatusSection);
+    expect(await screen.findByText('No active projects.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'On hold' }));
+    expect(await screen.findByText('No on-hold projects.')).toBeInTheDocument();
+  });
+
+  it('shows the forecast finish as +N days against the deadline', async () => {
+    const [migration, portal, study] = STATUS.items;
+    useRoutes({
+      '/insights/project-status': () => ({
+        as_of: AS_OF,
+        items: [
+          { ...migration, forecast_end_date: '2027-04-23' },
+          { ...portal, forecast_end_date: '2027-01-23' },
+          { ...study, forecast_end_date: null },
+          { ...portal, id: 7, name: 'One Day Late', end_date: '2027-02-22', forecast_end_date: '2027-02-23' },
+        ],
+      }),
+    });
+    renderSection(ProjectStatusSection);
+    const table = await screen.findByRole('table', { name: 'Project status' });
+    expect(within(table).getByRole('columnheader', { name: 'Forecast' })).toBeInTheDocument();
+    const late = within(table).getByRole('row', { name: /Data Center Migration/ });
+    expect(within(late).getByText('Apr 23, 2027')).toBeInTheDocument();
+    expect(within(late).getByText('+160 days')).toBeInTheDocument();
+    const onTime = within(table).getByRole('row', { name: /Customer Portal Revamp/ });
+    expect(within(onTime).getByText('Jan 23, 2027')).toBeInTheDocument();
+    expect(within(onTime).getByText('On time')).toBeInTheDocument();
+    expect(within(within(table).getByRole('row', { name: /Market Expansion Study/ }))
+      .getByText('No forecast yet')).toBeInTheDocument();
+    expect(within(within(table).getByRole('row', { name: /One Day Late/ })).getByText('+1 day'))
+      .toBeInTheDocument();
+  });
+});
+
+describe('the day overdue was judged on (phase 6, E4)', () => {
+  it.each([
+    ['project status', ProjectStatusSection],
+    ['at-risk projects', AtRiskSection],
+    ['deliverable progress', DeliverablesSection],
+  ])('is shown under %s', async (_name, Section) => {
+    useRoutes();
+    renderSection(Section);
+    expect(await screen.findByText('Overdue as of Nov 24, 2026 (UTC)')).toBeInTheDocument();
   });
 });
 

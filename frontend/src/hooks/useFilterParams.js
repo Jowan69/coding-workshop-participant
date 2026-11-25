@@ -28,6 +28,7 @@ export function useClearFilters(names) {
     setParams((previous) => {
       const next = new URLSearchParams(previous);
       names.forEach((name) => next.delete(name));
+      next.delete('page');
       return next;
     }, { replace: true });
   }, [names, setParams]);

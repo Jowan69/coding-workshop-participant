@@ -98,7 +98,8 @@ def test_ensure_schema_reapplies_a_changed_schema(monkeypatch, conn, database) -
     monkeypatch.setattr(db, "_schema_ready", False)
     db.ensure_schema(database.SETTINGS)
     stored = conn.execute("SELECT checksum FROM schema_meta").fetchone()["checksum"]
-    assert stored == db.schema_checksum()
+    # Phase 6 (C2): the checksum also covers a SHA-256 of SEED_PASSWORD
+    assert stored == db.schema_checksum(database.SETTINGS)
     assert conn.execute("SELECT count(*) AS n FROM projects").fetchone()["n"] == before
 
 
@@ -110,4 +111,4 @@ def test_checksum_read_inside_a_transaction_tolerates_a_missing_table(conn) -> N
 
 def test_apply_skips_when_another_container_finished_first(monkeypatch, conn, database) -> None:
     monkeypatch.setattr(db.seed, "run", lambda *a: pytest.fail("seed should not run"))
-    db._apply_schema(conn, database.SETTINGS, db.schema_checksum())
+    db._apply_schema(conn, database.SETTINGS, db.schema_checksum(database.SETTINGS))

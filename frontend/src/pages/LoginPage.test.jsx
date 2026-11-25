@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import TestProviders, { LocationProbe } from '../TestProviders';
-import { clearSession, getSession } from '../services/session';
+import { clearSession, getSession, setSession } from '../services/session';
 import LoginPage from './LoginPage';
 
 const FROM = { pathname: '/projects', search: '?status=active' };
@@ -31,14 +31,27 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
 
 describe('LoginPage', () => {
-  it('lists the demo emails but never a password', () => {
+  it('lists the demo emails in development, but never a password', () => {
+    vi.stubEnv('DEV', true);
     renderLogin();
     expect(screen.getByText(/admin@acme\.test, manager@acme\.test, lead@acme\.test, viewer@acme\.test/))
       .toBeInTheDocument();
     expect(screen.queryByText(/AcmeDemo/)).not.toBeInTheDocument();
+  });
+
+  it('shows no demo accounts in a production build', () => {
+    vi.stubEnv('DEV', false);
+    renderLogin();
+    expect(screen.getByLabelText(/Email/)).toBeInTheDocument();
+    expect(screen.queryByText(/Demo accounts/)).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/acme\.test/);
+    expect(document.body).not.toHaveTextContent(/AcmeDemo/);
   });
 
   it('validates before submitting and shows errors next to the fields', async () => {
@@ -116,5 +129,92 @@ describe('LoginPage', () => {
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeEnabled();
     expect(screen.queryByTestId('location')).not.toBeInTheDocument();
     expect(getSession()).toBeNull();
+  });
+
+  it.each([
+    [700, 'Too many attempts. Try again in 12 minutes.'],
+    [60, 'Too many attempts. Try again in 1 minute.'],
+    [1, 'Too many attempts. Try again in 1 minute.'],
+  ])('says how long to wait when sign-in is throttled (Retry-After %i)', async (seconds, message) => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      error: { code: 'too_many_attempts', message: 'Too many attempts. Try again in 15 minutes.' },
+    }), { status: 429, headers: { 'Retry-After': String(seconds) } }));
+    const user = userEvent.setup();
+    renderLogin();
+
+    await user.type(screen.getByLabelText(/Email/), 'manager@acme.test');
+    await user.type(screen.getByLabelText(/Password/), 'wrong-password');
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(message);
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeEnabled();
+  });
+
+  it("falls back to the API's wording when the Retry-After header cannot be read", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(429, {
+      error: { code: 'too_many_attempts', message: 'Too many attempts. Try again in 15 minutes.' },
+    }));
+    const user = userEvent.setup();
+    renderLogin();
+
+    await user.type(screen.getByLabelText(/Email/), 'manager@acme.test');
+    await user.type(screen.getByLabelText(/Password/), 'wrong-password');
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Too many attempts. Try again in 15 minutes.');
+  });
+
+  it('moves focus to the error after a failed sign-in, each time (phase 6, F6)', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse(401, {
+      error: { code: 'invalid_credentials', message: 'Email or password is incorrect' },
+    }));
+    const user = userEvent.setup();
+    renderLogin();
+
+    await user.type(screen.getByLabelText(/Email/), 'manager@acme.test');
+    await user.type(screen.getByLabelText(/Password/), 'wrong-password');
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveFocus();
+    expect(alert).toHaveAttribute('tabindex', '-1');
+
+    // the same error again must be announced again
+    await user.click(screen.getByLabelText(/Password/));
+    expect(screen.getByRole('alert')).not.toHaveFocus();
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+    await vi.waitFor(() => expect(screen.getByRole('alert')).toHaveFocus());
+  });
+
+  it('says the session ended when a token failed or was revoked (phase 6, F5)', () => {
+    setSession({ accessToken: 'a', refreshToken: 'r', user: { id: 1, full_name: 'Pat', role: 'viewer' } });
+    clearSession('expired');
+    renderLogin();
+    expect(screen.getByText('Your session ended. Sign in again.')).toBeInTheDocument();
+  });
+
+  it('says nothing of the kind after a deliberate sign-out or on a first visit (phase 6, F5)', () => {
+    setSession({ accessToken: 'a', refreshToken: 'r', user: { id: 1, full_name: 'Pat', role: 'viewer' } });
+    clearSession();
+    renderLogin();
+    expect(screen.queryByText('Your session ended. Sign in again.')).not.toBeInTheDocument();
+  });
+
+  it('replaces the session-ended note with the error when the next sign-in fails (phase 6, F5)', async () => {
+    clearSession('expired');
+    fetchMock.mockResolvedValueOnce(jsonResponse(401, {
+      error: { code: 'invalid_credentials', message: 'Email or password is incorrect' },
+    }));
+    const user = userEvent.setup();
+    renderLogin();
+    await user.type(screen.getByLabelText(/Email/), 'manager@acme.test');
+    await user.type(screen.getByLabelText(/Password/), 'wrong-password');
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Email or password is incorrect');
+    expect(screen.queryByText('Your session ended. Sign in again.')).not.toBeInTheDocument();
+  });
+
+  it('limits the password input to 128 characters (phase 6, F9)', () => {
+    renderLogin();
+    expect(screen.getByLabelText(/Password/)).toHaveAttribute('maxlength', '128');
   });
 });

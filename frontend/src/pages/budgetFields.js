@@ -1,3 +1,5 @@
+import { MONEY_MAX } from '../utils/format';
+
 /** Budget categories (API.md, Budgets) with their labels. */
 const CATEGORY_LABELS = {
   labor: 'Labor',
@@ -42,6 +44,7 @@ export function budgetFields() {
       label: 'Amount (USD)',
       type: 'number',
       required: true,
+      max: MONEY_MAX,
       decimals: 2,
       half: true,
       validate: (value) => (Number(value) > 0 ? null : 'Amount must be greater than 0'),

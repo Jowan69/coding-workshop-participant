@@ -1,12 +1,13 @@
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import PropTypes from 'prop-types';
-import { login, logout } from '../services/apiClient';
+import { login } from '../services/apiClient';
+import { changePassword, signOut } from '../services/authApi';
 import { getSession, subscribe } from '../services/session';
 import { canRole } from '../utils/permissions';
 import { AuthContext } from './auth-context';
 
 /**
- * Provides the signed-in user, their role, login, logout and can(action).
+ * Provides the signed-in user, their role, login, logout, changePassword and can(action).
  * The session store (services/session.js) is the source of truth, so a token refresh that
  * changes the role, or a refresh failure that signs the user out, updates the UI at once.
  *
@@ -23,7 +24,7 @@ export function AuthProvider({ children }) {
   const can = useCallback((action) => canRole(role, action), [role]);
 
   const value = useMemo(
-    () => ({ user, role, isAuthenticated, login, logout, can }),
+    () => ({ user, role, isAuthenticated, login, logout: signOut, changePassword, can }),
     [user, role, isAuthenticated, can],
   );
 

@@ -1,7 +1,8 @@
 """Demo data for a fresh database, with dates relative to today so the demo never goes stale.
 
 Each part runs only when its table is empty and looks up what it references by name or
-email, so a partly seeded database is completed rather than duplicated.
+email, so a partly seeded database is completed rather than duplicated. The one exception
+is the demo users' password: it follows SEED_PASSWORD every time the seed runs.
 
 The story: one healthy project, one past its deadline, one behind schedule with a blocked
 deliverable and a three-link dependency chain, one over budget, one completed and one
@@ -160,9 +161,10 @@ BUDGET_ENTRIES = (
 
 
 def run(conn: psycopg.Connection, settings: Settings) -> None:
-    """Seed every empty table, in dependency order."""
+    """Seed every empty table, in dependency order, and keep the demo logins current."""
     today = conn.execute("SELECT CURRENT_DATE AS today").fetchone()["today"]
-    _seed_users(conn, settings)
+    if not _seed_users(conn, settings):
+        _sync_demo_passwords(conn, settings)
     _seed_resources(conn)
     _seed_projects(conn, today)
     _seed_deliverables(conn, today)
@@ -186,12 +188,13 @@ def _day(today: date, offset: int) -> date:
     return today + timedelta(days=offset)
 
 
-def _seed_users(conn: psycopg.Connection, settings: Settings) -> None:
+def _seed_users(conn: psycopg.Connection, settings: Settings) -> bool:
+    """Create the demo users in an empty table; True when they were created just now."""
     if not _is_empty(conn, "users"):
-        return
+        return False
     if not settings.seed_password:
         logger.warning("SEED_PASSWORD is not set, so the demo users were not created")
-        return
+        return False
     rows = [
         (email, name, role, auth.hash_password(settings.seed_password))
         for email, name, role in USERS
@@ -201,6 +204,31 @@ def _seed_users(conn: psycopg.Connection, settings: Settings) -> None:
             "INSERT INTO users (email, full_name, role, password_hash) VALUES (%s, %s, %s, %s)",
             rows,
         )
+    return True
+
+
+def _sync_demo_passwords(conn: psycopg.Connection, settings: Settings) -> None:
+    """Make the demo accounts follow SEED_PASSWORD.
+
+    Any demo user whose stored hash does not verify against SEED_PASSWORD is re-hashed,
+    its sessions are revoked (token_version) and a pending temporary-password flag is
+    cleared. Accounts already on the password, and every other user, are left alone.
+    """
+    if not settings.seed_password:
+        return
+    emails = [email for email, _, _ in USERS]
+    rows = conn.execute(
+        "SELECT id, email, password_hash FROM users WHERE email = ANY(%s) ORDER BY id", (emails,)
+    ).fetchall()
+    for row in rows:
+        if auth.verify_password(settings.seed_password, row["password_hash"]):
+            continue
+        conn.execute(
+            "UPDATE users SET password_hash = %s, token_version = token_version + 1, "
+            "must_change_password = false, updated_at = clock_timestamp() WHERE id = %s",
+            (auth.hash_password(settings.seed_password), row["id"]),
+        )
+        logger.info("demo user %s now uses the current SEED_PASSWORD", row["email"])
 
 
 def _seed_resources(conn: psycopg.Connection) -> None:

@@ -30,7 +30,7 @@ BUDGETS = Resource(
     fields=(
         reference("project_id", "projects", required=True),
         enum("category", CATEGORIES, required=True),
-        string("description", max_length=500),
+        string("description", max_length=500, multiline=True),
         decimal("amount", required=True, minimum=0, exclusive_minimum=True),
         date_field("spent_on", required=True),
     ),
@@ -40,6 +40,7 @@ BUDGETS = Resource(
         Filter("spent_from", "date", where="t.spent_on >= %s"),
         Filter("spent_to", "date", where="t.spent_on <= %s"),
     ),
+    searchable=("description",),
     sortable=("spent_on", "amount", "category"),
     default_sort="-spent_on",
     before_save=_set_creator,

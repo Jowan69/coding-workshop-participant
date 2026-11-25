@@ -1,15 +1,14 @@
-import { todayIso } from '../utils/format';
 import { DELIVERABLE_STATUS_OPTIONS } from '../utils/status';
 
 /**
- * Whether a deliverable is past its due date and not done.
+ * Whether a deliverable is past its due date and not done. The API decides, with the
+ * database's date (`is_overdue`, judged on `as_of`); the browser's clock is never consulted.
  *
- * @param {{due_date: string, status: string}} deliverable Deliverable from the API.
- * @param {string} [today] `YYYY-MM-DD`, for tests.
+ * @param {{is_overdue?: boolean}} deliverable Deliverable from the API.
  * @returns {boolean} True when overdue.
  */
-export function isDeliverableOverdue(deliverable, today = todayIso()) {
-  return Boolean(deliverable.due_date) && deliverable.due_date < today && deliverable.status !== 'done';
+export function isDeliverableOverdue(deliverable) {
+  return deliverable.is_overdue === true;
 }
 
 /**

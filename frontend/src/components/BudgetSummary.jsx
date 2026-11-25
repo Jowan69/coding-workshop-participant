@@ -67,7 +67,7 @@ export default function BudgetSummary({ summary }) {
       component="section"
       variant="outlined"
       aria-labelledby={headingId}
-      sx={{ p: { xs: 2, md: 3 }, display: 'grid', gap: 2 }}
+      sx={{ p: { xs: 2, md: 3 }, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 2 }}
     >
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
         <Typography id={headingId} variant="h6" component="h2">Budget summary</Typography>

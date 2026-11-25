@@ -8,6 +8,7 @@ import Skeleton from '@mui/material/Skeleton';
 import Typography from '@mui/material/Typography';
 import InboxOutlinedIcon from '@mui/icons-material/InboxOutlined';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import { useRefresh } from '../context/refresh-context';
 import { useApiGet } from '../hooks/useApiGet';
 import { sectionHeadingId } from '../utils/dashboardSections';
 
@@ -38,7 +39,8 @@ EmptyState.propTypes = {
 /**
  * One Dashboard question: the question as a heading, optional controls, and the answer loaded
  * from the API by this section alone, with its own loading, empty and error states. A failure
- * here never affects the other sections.
+ * here never affects the other sections. A page refresh (RefreshContext) loads it again and
+ * keeps the current answer on screen meanwhile.
  *
  * @param {object} props Component props.
  * @param {string} props.id Section id; the heading gets `sectionHeadingId(id)`.
@@ -58,10 +60,10 @@ export default function InsightSection({
   id, title, description, label, path, query, isEmpty, emptyMessage, controls, idle, children,
 }) {
   const headingId = sectionHeadingId(id);
-  const { data, loading, error, reload } = useApiGet(path, query);
+  const { data, loading, refreshing, error, reload } = useApiGet(path, query, useRefresh());
 
   let body;
-  if (loading) {
+  if (loading && !refreshing) {
     body = <LoadingState />;
   } else if (error) {
     body = (
@@ -93,14 +95,21 @@ export default function InsightSection({
       aria-labelledby={headingId}
       aria-busy={loading || undefined}
       // The app bar is fixed: keep a jumped-to heading clear of it.
-      sx={{ p: { xs: 2, md: 3 }, display: 'grid', gap: 2, minWidth: 0, scrollMarginTop: 80 }}
+      sx={{
+        p: { xs: 2, md: 3 },
+        display: 'grid',
+        gridTemplateColumns: 'minmax(0, 1fr)',
+        gap: 2,
+        minWidth: 0,
+        scrollMarginTop: 80,
+      }}
     >
       <Box
         sx={{
           display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', gap: 2,
         }}
       >
-        <Box sx={{ minWidth: 0 }}>
+        <Box sx={{ minWidth: 0, maxWidth: '100%' }}>
           <Typography id={headingId} variant="h5" component="h2" tabIndex={-1}>{title}</Typography>
           {description && (
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{description}</Typography>

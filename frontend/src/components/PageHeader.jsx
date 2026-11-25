@@ -25,15 +25,20 @@ export default function PageHeader({ title, description, actions }) {
     >
       {/* React 19 hoists <title> into the document head. */}
       <title>{`${title} · ACME Project Tracker`}</title>
-      <Box sx={{ minWidth: 0 }}>
-        <Typography variant="h1" component="h1">{title}</Typography>
+      {/* min-width 0 lets a long unbroken title wrap instead of widening the page. */}
+      <Box sx={{ minWidth: 0, maxWidth: '100%' }}>
+        <Typography variant="h1" component="h1" sx={{ overflowWrap: 'anywhere' }}>{title}</Typography>
         {description && (
-          <Typography variant="body1" color="text.secondary" sx={{ mt: 0.5 }}>
+          <Typography variant="body1" color="text.secondary" sx={{ mt: 0.5, overflowWrap: 'anywhere' }}>
             {description}
           </Typography>
         )}
       </Box>
-      {actions && <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>{actions}</Box>}
+      {actions && (
+        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', minWidth: 0, maxWidth: '100%' }}>
+          {actions}
+        </Box>
+      )}
     </Box>
   );
 }

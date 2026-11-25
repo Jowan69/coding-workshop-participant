@@ -65,7 +65,8 @@ def test_access_token_round_trip() -> None:
     issued = auth.issue_tokens(USER, SETTINGS)
     assert issued["token_type"] == "Bearer"
     assert issued["expires_in"] == 1800
-    assert auth.authenticate(_bearer(issued["access_token"]), SETTINGS) == USER
+    # Phase 6 (B2): the token now carries the user's token_version as "ver"
+    assert auth.authenticate(_bearer(issued["access_token"]), SETTINGS) == {**USER, "ver": 0}
 
 
 def test_token_lifetimes() -> None:

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
@@ -8,8 +8,11 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import InsightsIcon from '@mui/icons-material/Insights';
 import { useAuth } from '../context/auth-context';
+import { getSessionEndReason } from '../services/session';
+import { PASSWORD_MAX } from '../utils/passwordRules';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** Shown under the email field in local development only, never in a production build. */
 const DEMO_EMAILS = ['admin@acme.test', 'manager@acme.test', 'lead@acme.test', 'viewer@acme.test'];
 
 function validate({ email, password }) {
@@ -20,6 +23,15 @@ function validate({ email, password }) {
   return errors;
 }
 
+/** What to say when sign-in failed; a throttled email gets the wait in minutes. */
+function failureMessage(error) {
+  if (error.code === 'too_many_attempts' && error.retryAfter) {
+    const minutes = Math.ceil(error.retryAfter / 60);
+    return `Too many attempts. Try again in ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}.`;
+  }
+  return error.message || 'Sign-in failed. Please try again.';
+}
+
 function returnPath(state) {
   const from = state?.from;
   if (!from?.pathname || from.pathname === '/login') return '/';
@@ -27,8 +39,9 @@ function returnPath(state) {
 }
 
 /**
- * Sign-in form. Validates before submitting, shows server errors in an alert, and returns the
- * user to the page they were heading to.
+ * Sign-in form. Validates before submitting, shows server errors in an alert that takes focus
+ * (so a screen reader announces it), and returns the user to the page they were heading to.
+ * When the previous session ended because a token failed or was revoked, it says so.
  *
  * @returns {JSX.Element} The sign-in page.
  */
@@ -38,9 +51,17 @@ export default function LoginPage() {
   const [values, setValues] = useState({ email: '', password: '' });
   const [errors, setErrors] = useState({});
   const [serverError, setServerError] = useState(null);
+  const [failures, setFailures] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+  const [sessionEnded] = useState(() => getSessionEndReason() === 'expired');
   const emailRef = useRef(null);
   const passwordRef = useRef(null);
+  const errorRef = useRef(null);
+
+  // After each failed sign-in, move focus to the error so it is announced.
+  useEffect(() => {
+    if (failures > 0) errorRef.current?.focus();
+  }, [failures]);
 
   if (isAuthenticated) return <Navigate to={returnPath(location.state)} replace />;
 
@@ -72,7 +93,8 @@ export default function LoginPage() {
         email: error.fieldErrors?.email && `Email ${error.fieldErrors.email}`,
         password: error.fieldErrors?.password && `Password ${error.fieldErrors.password}`,
       });
-      setServerError(error.message || 'Sign-in failed. Please try again.');
+      setServerError(failureMessage(error));
+      setFailures((count) => count + 1);
       setSubmitting(false);
     }
   };
@@ -102,7 +124,12 @@ export default function LoginPage() {
           Project status, deadline risk, resources and budget in one place.
         </Typography>
 
-        {serverError && <Alert severity="error" sx={{ mb: 2 }}>{serverError}</Alert>}
+        {sessionEnded && !serverError && (
+          <Alert severity="info" sx={{ mb: 2 }}>Your session ended. Sign in again.</Alert>
+        )}
+        {serverError && (
+          <Alert severity="error" ref={errorRef} tabIndex={-1} sx={{ mb: 2 }}>{serverError}</Alert>
+        )}
 
         <Box component="form" noValidate onSubmit={handleSubmit} aria-label="Sign in">
           <TextField
@@ -122,9 +149,11 @@ export default function LoginPage() {
             helperText={(
               <>
                 {errors.email && <Box component="span" sx={{ display: 'block' }}>{errors.email}</Box>}
-                <Box component="span" sx={{ display: 'block', color: 'text.secondary' }}>
-                  {`Demo accounts: ${DEMO_EMAILS.join(', ')}`}
-                </Box>
+                {import.meta.env.DEV && (
+                  <Box component="span" sx={{ display: 'block', color: 'text.secondary' }}>
+                    {`Demo accounts: ${DEMO_EMAILS.join(', ')}`}
+                  </Box>
+                )}
               </>
             )}
           />
@@ -142,6 +171,7 @@ export default function LoginPage() {
             error={Boolean(errors.password)}
             helperText={errors.password}
             inputRef={passwordRef}
+            slotProps={{ htmlInput: { maxLength: PASSWORD_MAX } }}
           />
           <Button
             type="submit"

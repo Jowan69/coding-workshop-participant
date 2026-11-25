@@ -13,8 +13,10 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import SubdirectoryArrowRightIcon from '@mui/icons-material/SubdirectoryArrowRight';
 import InsightSection from '../../components/InsightSection';
 import StatusChip from '../../components/StatusChip';
+import { useRefresh } from '../../context/refresh-context';
 import { useApiGet } from '../../hooks/useApiGet';
 import { useIsDesktop } from '../../hooks/useIsDesktop';
+import { WRAPPING_CHIP_SX } from '../../theme';
 import { SECTION_IDS } from '../../utils/dashboardSections';
 import { chainRows } from '../../utils/dependencyTree';
 import { formatDate } from '../../utils/format';
@@ -29,7 +31,7 @@ function BlockedMarker({ names }) {
       variant="outlined"
       icon={<BlockIcon aria-hidden="true" />}
       label={`Blocked by ${names.join(', ')}`}
-      sx={{ maxWidth: '100%', height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.25 } }}
+      sx={WRAPPING_CHIP_SX}
     />
   );
 }
@@ -68,7 +70,7 @@ function ChainList({ chain }) {
               <SubdirectoryArrowRightIcon aria-hidden="true" fontSize="small" sx={{ color: 'text.secondary', mt: 0.25 }} />
             )}
             <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1, minWidth: 0 }}>
-              <Typography variant="body2" sx={{ fontWeight: 600 }}>{item.title}</Typography>
+              <Typography variant="body2" sx={{ fontWeight: 600, minWidth: 0 }}>{item.title}</Typography>
               <StatusChip status={item.status} />
               <Typography variant="caption" color="text.secondary">{`Due ${formatDate(item.due_date)}`}</Typography>
               {item.blocked_by_upstream && <BlockedMarker names={blockers} />}
@@ -156,7 +158,7 @@ ProjectsUnavailable.propTypes = {
  * @returns {JSX.Element} The section.
  */
 export default function DependencySection() {
-  const projects = useApiGet('/projects', PROJECT_QUERY);
+  const projects = useApiGet('/projects', PROJECT_QUERY, useRefresh());
   const [chosen, setChosen] = useState('');
   const options = projects.data?.items ?? [];
   const selected = options.some((project) => project.id === chosen) ? chosen : (options[0]?.id ?? '');

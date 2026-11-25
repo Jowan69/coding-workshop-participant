@@ -11,6 +11,26 @@ export const STATUS_COLORS = {
   done: '#455a64',
 };
 
+/**
+ * Long unbroken values (a 150-character name, an email, a description without spaces) must
+ * wrap inside their box instead of widening the page. Three rules, set once here:
+ *
+ * - `body` inherits `overflow-wrap: break-word` to all text, which wraps wherever a box has a
+ *   width to wrap at. Flex and grid children need `min-width: 0` for that (their automatic
+ *   minimum is the longest word), which the layout components set.
+ * - Table cells, headings, dialog titles and menu items use `anywhere`, which also lets a
+ *   table column or a flex item shrink below its longest word.
+ * - Table headings do not wrap, so a column never gets narrower than its label.
+ */
+const WRAP_ANYWHERE = { overflowWrap: 'anywhere' };
+
+/** For a chip whose label is user text (a reason, deliverable names): wrap, never truncate. */
+export const WRAPPING_CHIP_SX = {
+  maxWidth: '100%',
+  height: 'auto',
+  '& .MuiChip-label': { whiteSpace: 'normal', overflowWrap: 'anywhere', py: 0.25 },
+};
+
 const FOCUS_RING = '#f5a623';
 const FONT_STACK = [
   '"Segoe UI"',
@@ -68,6 +88,7 @@ const theme = createTheme(base, {
   components: {
     MuiCssBaseline: {
       styleOverrides: {
+        body: { overflowWrap: 'break-word' },
         // One visible focus ring for keyboard users everywhere, never removed.
         ':focus-visible': {
           outline: `3px solid ${FOCUS_RING}`,
@@ -110,16 +131,42 @@ const theme = createTheme(base, {
     },
     MuiTableCell: {
       styleOverrides: {
+        root: WRAP_ANYWHERE,
         head: {
           fontWeight: 600,
           color: base.palette.text.secondary,
           backgroundColor: '#f8fafc',
+          whiteSpace: 'nowrap',
         },
+      },
+    },
+    MuiTypography: {
+      styleOverrides: {
+        h1: WRAP_ANYWHERE,
+        h2: WRAP_ANYWHERE,
+        h3: WRAP_ANYWHERE,
+        h4: WRAP_ANYWHERE,
+        h5: WRAP_ANYWHERE,
+        h6: WRAP_ANYWHERE,
+        subtitle1: WRAP_ANYWHERE,
+        subtitle2: WRAP_ANYWHERE,
+      },
+    },
+    MuiMenuItem: {
+      styleOverrides: {
+        root: { whiteSpace: 'normal', overflowWrap: 'anywhere' },
+      },
+    },
+    MuiAutocomplete: {
+      styleOverrides: {
+        option: WRAP_ANYWHERE,
       },
     },
     MuiChip: {
       styleOverrides: {
-        root: { fontWeight: 600 },
+        // A chip never grows wider than its container; its label then truncates or, with
+        // WRAPPING_CHIP_SX, wraps.
+        root: { fontWeight: 600, maxWidth: '100%' },
       },
     },
     MuiLinearProgress: {
@@ -130,7 +177,7 @@ const theme = createTheme(base, {
     },
     MuiDialogTitle: {
       defaultProps: { component: 'h2' },
-      styleOverrides: { root: { fontSize: '1.25rem', fontWeight: 600 } },
+      styleOverrides: { root: { fontSize: '1.25rem', fontWeight: 600, overflowWrap: 'anywhere' } },
     },
   },
 });

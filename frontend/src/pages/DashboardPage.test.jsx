@@ -1,10 +1,10 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import TestProviders, { LocationProbe } from '../TestProviders';
 import { ApiError, request } from '../services/apiClient';
 import { clearSession, setSession } from '../services/session';
-import DashboardPage from './DashboardPage';
+import DashboardPage, { AUTO_REFRESH_MS } from './DashboardPage';
 
 vi.mock('../services/apiClient', async (importOriginal) => ({
   ...(await importOriginal()),
@@ -22,7 +22,7 @@ const SUMMARY = {
 };
 
 const QUESTIONS = [
-  'Where does each project stand?',
+  'What is the status of each active project?',
   'Which projects are at risk?',
   'Who is allocated to which project?',
   'How are deliverables progressing?',
@@ -142,7 +142,7 @@ describe('DashboardPage', () => {
     renderDashboard();
     expect(await screen.findByText('Could not load at-risk projects')).toBeInTheDocument();
     expect(await screen.findByText('Could not load the headline counts')).toBeInTheDocument();
-    const status = screen.getByRole('region', { name: 'Where does each project stand?' });
+    const status = screen.getByRole('region', { name: 'What is the status of each active project?' });
     expect(await within(status).findByText('Data Center Migration')).toBeInTheDocument();
     const budget = screen.getByRole('region', { name: 'Are projects within budget?' });
     expect(await within(budget).findByText('No projects yet, so no budgets to compare.')).toBeInTheDocument();
@@ -166,9 +166,98 @@ describe('DashboardPage', () => {
     useRoutes();
     renderDashboard();
     await tiles();
-    const status = screen.getByRole('region', { name: 'Where does each project stand?' });
+    const status = screen.getByRole('region', { name: 'What is the status of each active project?' });
     const cards = await within(status).findByRole('list', { name: 'Project status' });
     expect(within(cards).getByRole('link', { name: 'Data Center Migration' })).toBeInTheDocument();
     expect(within(status).queryByRole('table')).not.toBeInTheDocument();
+  });
+});
+
+describe('Dashboard freshness', () => {
+  const INSIGHTS = Object.keys(ROUTES).filter((path) => path.startsWith('/insights/'));
+  const callsTo = (path) => request.mock.calls.filter(([url]) => url === path).length;
+  const setVisibility = (state) => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
+  };
+
+  afterEach(() => {
+    vi.useRealTimers();
+    delete document.visibilityState;
+  });
+
+  it('says when the data last arrived', async () => {
+    useRoutes();
+    renderDashboard();
+    expect(screen.getByTestId('dashboard-updated')).toHaveTextContent('Loading…');
+    await tiles();
+    expect(screen.getByTestId('dashboard-updated')).toHaveTextContent(/^Updated \d{2}:\d{2}$/);
+  });
+
+  it('reloads every section when Refresh is clicked, keeping the answers on screen', async () => {
+    const user = userEvent.setup();
+    useRoutes();
+    renderDashboard();
+    await tiles();
+    expect(await screen.findByText('Deadline passed 10 days ago')).toBeInTheDocument();
+    INSIGHTS.forEach((path) => expect(callsTo(path)).toBe(1));
+
+    // Hold the second round open: the first answers must stay, with no skeletons.
+    const release = {};
+    const hold = (name) => () => new Promise((resolve) => { release[name] = resolve; });
+    useRoutes({ '/insights/at-risk': hold('atRisk'), '/insights/summary': hold('summary') });
+    await user.click(screen.getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => INSIGHTS.forEach((path) => expect(callsTo(path)).toBe(2)));
+    expect(screen.getByText('Deadline passed 10 days ago')).toBeInTheDocument();
+    expect(screen.queryByTestId('tile-loading')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('section-loading')).not.toBeInTheDocument();
+
+    await act(async () => {
+      release.summary({ ...SUMMARY, active_projects: 9 });
+      release.atRisk({ as_of: AS_OF, items: [] });
+    });
+    const region = await tiles();
+    expect(await within(region).findByRole('link', { name: tileName(9, 'Active projects') })).toBeInTheDocument();
+    expect(await screen.findByText('No project is at risk: every open project is on track.')).toBeInTheDocument();
+  });
+
+  it('reloads by itself every 60 seconds while the tab is visible', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    setVisibility('visible');
+    useRoutes();
+    renderDashboard();
+    await tiles();
+    expect(AUTO_REFRESH_MS).toBe(60000);
+
+    act(() => { vi.advanceTimersByTime(AUTO_REFRESH_MS - 1); });
+    INSIGHTS.forEach((path) => expect(callsTo(path)).toBe(1));
+    act(() => { vi.advanceTimersByTime(1); });
+    await waitFor(() => INSIGHTS.forEach((path) => expect(callsTo(path)).toBe(2)));
+  });
+
+  it('does not reload while the tab is hidden, and catches up when it is shown again', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+    setVisibility('visible');
+    useRoutes();
+    renderDashboard();
+    await tiles();
+
+    setVisibility('hidden');
+    act(() => { vi.advanceTimersByTime(AUTO_REFRESH_MS * 3); });
+    INSIGHTS.forEach((path) => expect(callsTo(path)).toBe(1));
+
+    setVisibility('visible');
+    act(() => { document.dispatchEvent(new Event('visibilitychange')); });
+    await waitFor(() => INSIGHTS.forEach((path) => expect(callsTo(path)).toBe(2)));
+  });
+
+  it('stops the timer when the page is left', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    setVisibility('visible');
+    useRoutes();
+    const view = render(<TestProviders><DashboardPage /></TestProviders>);
+    await tiles();
+    view.unmount();
+    act(() => { vi.advanceTimersByTime(AUTO_REFRESH_MS * 2); });
+    INSIGHTS.forEach((path) => expect(callsTo(path)).toBe(1));
   });
 });

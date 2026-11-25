@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date
@@ -19,6 +20,10 @@ if TYPE_CHECKING:
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 MONEY_MAX = Decimal("999999999999.99")  # numeric(14,2)
+DATE_MIN = date(2000, 1, 1)
+DATE_MAX = date(2100, 12, 31)
+# Control characters a multi-line field may contain: line breaks and tabs
+_MULTILINE_WHITESPACE = "\n\r\t"
 
 FieldError = dict[str, str]
 Check = Callable[[Mapping[str, Any]], list[FieldError]]
@@ -36,6 +41,7 @@ class Field:
     max_length: int | None = None
     min_length: int | None = None
     strip: bool = True  # False for passwords: surrounding spaces are significant
+    multiline: bool = False  # True: line breaks and tabs are allowed in the text
     choices: tuple[str, ...] = ()
     minimum: int | Decimal | None = None
     maximum: int | Decimal | None = None
@@ -45,12 +51,16 @@ class Field:
 
 def string(
     name: str, *, required: bool = False, max_length: int = 255, min_length: int | None = None,
-    strip: bool = True,
+    strip: bool = True, multiline: bool = False,
 ) -> Field:
-    """A string, trimmed unless ``strip`` is False; empty or blank counts as missing."""
+    """A string, trimmed unless ``strip`` is False; empty or blank counts as missing.
+
+    Control characters (NUL and the like) are refused; ``multiline`` allows line breaks
+    and tabs.
+    """
     return Field(
         name, "string", required=required, max_length=max_length, min_length=min_length,
-        strip=strip,
+        strip=strip, multiline=multiline,
     )
 
 
@@ -81,7 +91,7 @@ def decimal(
 
 
 def date_field(name: str, *, required: bool = False) -> Field:
-    """A calendar date as ``YYYY-MM-DD``."""
+    """A calendar date as ``YYYY-MM-DD``, from 2000-01-01 to 2100-12-31."""
     return Field(name, "date", required=required)
 
 
@@ -120,10 +130,23 @@ def _check_range(spec: Field, value: int | Decimal) -> None:
         raise _Invalid(f"must be at most {spec.maximum}")
 
 
+def has_control_characters(text: str, *, multiline: bool = False) -> bool:
+    """True when ``text`` holds a control character (Unicode category Cc), such as NUL.
+
+    Line breaks and tabs do not count when ``multiline`` is set.
+    """
+    allowed = _MULTILINE_WHITESPACE if multiline else ""
+    return any(unicodedata.category(char) == "Cc" and char not in allowed for char in text)
+
+
 def _coerce_text(spec: Field, value: Any) -> str:
     if not isinstance(value, str):
         raise _Invalid("must be a string")
     text = value.strip() if spec.strip else value
+    if has_control_characters(text, multiline=spec.multiline):
+        if spec.multiline:
+            raise _Invalid("must not contain control characters other than line breaks and tabs")
+        raise _Invalid("must not contain control characters, line breaks or tabs")
     if spec.kind == "email":
         text = text.lower()
         if not EMAIL_RE.match(text):
@@ -162,9 +185,12 @@ def _coerce(spec: Field, value: Any) -> Any:
         if not isinstance(value, str) or not DATE_RE.match(value.strip()):
             raise _Invalid("must be a date in YYYY-MM-DD format")
         try:
-            return date.fromisoformat(value.strip())
+            parsed = date.fromisoformat(value.strip())
         except ValueError as exc:
             raise _Invalid("must be a real calendar date") from exc
+        if not DATE_MIN <= parsed <= DATE_MAX:
+            raise _Invalid(f"must be between {DATE_MIN.isoformat()} and {DATE_MAX.isoformat()}")
+        return parsed
     if spec.kind == "enum":
         if not isinstance(value, str) or value.strip() not in spec.choices:
             raise _Invalid("must be one of: " + ", ".join(spec.choices))
@@ -281,6 +307,8 @@ def parse_param(
             return _coerce(Field(name, kind, choices=choices), text)
         if not text:
             raise _Invalid("cannot be empty")
+        if has_control_characters(text):
+            raise _Invalid("must not contain control characters")
         return text
     except _Invalid as exc:
         raise BadRequest(f"Invalid query parameter {name}", [_error(name, str(exc))]) from exc

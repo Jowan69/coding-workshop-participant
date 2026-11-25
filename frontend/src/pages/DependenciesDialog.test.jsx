@@ -153,8 +153,17 @@ describe('DependenciesDialog', () => {
     expect(await screen.findByText('Does not depend on anything.')).toBeInTheDocument();
   });
 
-  it('does not offer removal to contributors (the API needs a manager)', async () => {
+  // Phase 6 (F2): unlinking edits a deliverable and deletes no record, so contributors may.
+  it('lets contributors remove a link too', async () => {
     renderDialog('contributor');
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Remove dependency on Payments integration' }));
+    await waitFor(() => expect(calls('DELETE', '/deliverables/103/dependencies/102')).toHaveLength(1));
+    expect(await screen.findByText('Does not depend on anything.')).toBeInTheDocument();
+  });
+
+  it('does not offer removal to viewers', async () => {
+    renderDialog('viewer');
     await screen.findByRole('region', { name: 'Depends on' });
     expect(screen.queryByRole('button', { name: 'Remove dependency on Payments integration' })).not.toBeInTheDocument();
   });

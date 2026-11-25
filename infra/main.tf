@@ -12,6 +12,12 @@ resource "random_password" "jwt" {
   special = false
 }
 
+# Demo users' password in AWS when var.demo_password is not set (letters and digits)
+resource "random_password" "demo" {
+  length  = 20
+  special = false
+}
+
 resource "random_pet" "this" {
   length    = 3
   separator = "-"

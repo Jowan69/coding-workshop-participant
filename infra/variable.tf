@@ -84,10 +84,17 @@ variable "aws_eks_type" {
   }
 }
 
-# Password for the seeded demo users, exposed to Lambda as SEED_PASSWORD
+# CloudFront Function that serves index.html for paths without a file extension
+variable "enable_spa_rewrite" {
+  description = "Create the CloudFront Function that makes non-hash URLs (/projects/5) open the app. Set to false if the role cannot create CloudFront Functions."
+  type        = bool
+  default     = true
+}
+
+# Password for the seeded demo users, exposed to Lambda as SEED_PASSWORD (see local.demo_password)
 variable "demo_password" {
-  description = "Password given to the seeded demo users of the tracker API."
+  description = "Password of the seeded demo users. Unset: a fixed value on LocalStack, a generated one in AWS."
   type        = string
   sensitive   = true
-  default     = "AcmeDemo-2026"
+  default     = null
 }

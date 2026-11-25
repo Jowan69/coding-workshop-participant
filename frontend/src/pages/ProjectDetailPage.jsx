@@ -14,6 +14,7 @@ import Typography from '@mui/material/Typography';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SearchOffIcon from '@mui/icons-material/SearchOff';
+import AsOfNote from '../components/AsOfNote';
 import BudgetBar from '../components/BudgetBar';
 import PageHeader from '../components/PageHeader';
 import ProgressBar from '../components/ProgressBar';
@@ -70,7 +71,10 @@ function Fact({ label, children }) {
       <Typography component="dt" variant="body2" color="text.secondary">{label}</Typography>
       <Box
         component="dd"
-        sx={{ m: 0, mt: 0.5, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1 }}
+        sx={{
+          m: 0, mt: 0.5, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1,
+          '& > *': { minWidth: 0 },
+        }}
       >
         {children}
       </Box>
@@ -146,6 +150,7 @@ function ProjectSummary({ project }) {
           showLabel
         />
       </Box>
+      <AsOfNote date={project.as_of} />
     </Paper>
   );
 }
@@ -157,6 +162,8 @@ ProjectSummary.propTypes = {
     start_date: PropTypes.string,
     end_date: PropTypes.string,
     owner_name: PropTypes.string,
+    is_overdue: PropTypes.bool,
+    as_of: PropTypes.string,
     percent_complete: PropTypes.number,
     deliverables_total: PropTypes.number,
     deliverable_counts: PropTypes.object,
@@ -171,13 +178,9 @@ function ProjectDetail({ projectId }) {
   const project = useApiGet(`/projects/${projectId}`);
 
   const current = TABS.find((tab) => tab.value === params.get('tab')) ?? TABS[0];
-  const selectTab = (event, value) => {
-    setParams((previous) => {
-      const next = new URLSearchParams(previous);
-      next.set('tab', value);
-      return next;
-    });
-  };
+  // Filters belong to one tab ("q" searches deliverables on one and budget entries on
+  // another), so switching tabs keeps only the tab itself.
+  const selectTab = (event, value) => setParams({ tab: value });
 
   if (project.error?.status === 404) return <ProjectNotFound />;
   if (project.error) {

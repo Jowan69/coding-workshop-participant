@@ -22,6 +22,7 @@ function readStored() {
 }
 
 let current = readStored();
+let endReason = null;
 
 function notify() {
   listeners.forEach((listener) => listener(current));
@@ -44,6 +45,7 @@ export function getSession() {
  */
 export function setSession(session) {
   current = session;
+  endReason = null;
   try {
     window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(session));
   } catch {
@@ -52,15 +54,30 @@ export function setSession(session) {
   notify();
 }
 
-/** Forget the session and notify subscribers. */
-export function clearSession() {
+/**
+ * Forget the session and notify subscribers.
+ *
+ * @param {'expired'|null} [reason] Why: "expired" when a token failed or was revoked and
+ *   could not be renewed; nothing when the user signed out themselves.
+ */
+export function clearSession(reason = null) {
   current = null;
+  endReason = reason;
   try {
     window.sessionStorage.removeItem(STORAGE_KEY);
   } catch {
     // Nothing stored or storage blocked: the in-memory session is already gone.
   }
   notify();
+}
+
+/**
+ * Why the last session ended, for the sign-in page ("Your session ended. Sign in again.").
+ *
+ * @returns {'expired'|null} The reason; null after a deliberate sign-out or a new sign-in.
+ */
+export function getSessionEndReason() {
+  return endReason;
 }
 
 /**

@@ -1,27 +1,48 @@
-import { todayIso } from '../utils/format';
+import { MONEY_MAX } from '../utils/format';
 import { PROJECT_STATUS_OPTIONS } from '../utils/status';
 
-/** Statuses after which a passed deadline no longer matters. */
-const CLOSED_STATUSES = new Set(['completed', 'cancelled']);
-
 /**
- * Whether a project's deadline has passed while it is still open.
+ * Whether a project's deadline has passed while it is still open. The API decides, with the
+ * database's date (`is_overdue`, judged on `as_of`); the browser's clock is never consulted.
  *
- * @param {{end_date: string, status: string}} project Project from the API.
- * @param {string} [today] `YYYY-MM-DD`, for tests.
+ * @param {{is_overdue?: boolean}} project Project from the API.
  * @returns {boolean} True when overdue.
  */
-export function isProjectOverdue(project, today = todayIso()) {
-  return Boolean(project.end_date) && project.end_date < today && !CLOSED_STATUSES.has(project.status);
+export function isProjectOverdue(project) {
+  return project.is_overdue === true;
+}
+
+/**
+ * Owner picker options: the active users, always including the signed-in user (the default
+ * owner of a new project) and the current owner of the project being edited, even if that
+ * person has since been deactivated.
+ *
+ * @param {Array<{id: number, full_name: string}>} [users] `/auth/users/options` items.
+ * @param {{id: number, full_name: string}|null} [me] The signed-in user.
+ * @param {{owner_id?: number|null, owner_name?: string|null}|null} [project] Project in the form.
+ * @returns {Array<{value: number, label: string}>} Options, by name.
+ */
+export function ownerOptions(users = [], me = null, project = null) {
+  const byId = new Map();
+  const add = (id, name) => {
+    if (Number.isInteger(id) && typeof name === 'string' && name && !byId.has(id)) byId.set(id, name);
+  };
+  (Array.isArray(users) ? users : []).forEach((item) => add(item?.id, item?.full_name));
+  add(me?.id, me?.full_name);
+  add(project?.owner_id, project?.owner_name);
+  return [...byId]
+    .map(([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 }
 
 /**
  * The project form, with the same limits the API enforces (API.md, Projects).
  *
  * @param {string[]} [departments] Known departments, suggested while typing.
+ * @param {Array<{value: number, label: string}>} [owners] People who can own the project.
  * @returns {object[]} FormDialog field specs.
  */
-export function projectFields(departments = []) {
+export function projectFields(departments = [], owners = []) {
   return [
     { name: 'name', label: 'Name', type: 'text', required: true, maxLength: 150 },
     {
@@ -62,9 +83,18 @@ export function projectFields(departments = []) {
       type: 'number',
       required: true,
       min: 0,
+      max: MONEY_MAX,
       decimals: 2,
       defaultValue: 0,
       half: true,
+    },
+    {
+      name: 'owner_id',
+      label: 'Owner',
+      type: 'autocomplete',
+      options: owners,
+      half: true,
+      helperText: 'Who answers for the project',
     },
     {
       name: 'description',

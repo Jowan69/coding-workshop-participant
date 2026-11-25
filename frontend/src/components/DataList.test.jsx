@@ -129,3 +129,87 @@ describe('DataList', () => {
     expect(onRowsPerPageChange).toHaveBeenCalledWith(25);
   });
 });
+
+describe('DataList sorting (phase 6, F3)', () => {
+  const SORTABLE = [
+    { key: 'name', label: 'Name', sortKey: 'name' },
+    { key: 'department', label: 'Department' },
+    { key: 'budget', label: 'Budget', sortKey: 'budget_planned', render: (row) => `$${row.budget}` },
+  ];
+  const CHOICES = [
+    { value: 'name', label: 'Name, ascending' },
+    { value: '-name', label: 'Name, descending' },
+    { value: 'budget_planned', label: 'Budget, ascending' },
+    { value: '-budget_planned', label: 'Budget, descending' },
+  ];
+  const header = (name) => screen.getByRole('columnheader', { name });
+
+  it('marks the sorted column with aria-sort and only that one', () => {
+    renderList({ columns: SORTABLE, sort: '-name', onSortChange: vi.fn(), sortChoices: CHOICES });
+    expect(header('Name')).toHaveAttribute('aria-sort', 'descending');
+    expect(header('Budget')).not.toHaveAttribute('aria-sort');
+    expect(header('Department')).not.toHaveAttribute('aria-sort');
+  });
+
+  it('offers a sort button on sortable columns only', () => {
+    renderList({ columns: SORTABLE, sort: 'name', onSortChange: vi.fn(), sortChoices: CHOICES });
+    expect(within(header('Name')).getByRole('button', { name: 'Name' })).toBeInTheDocument();
+    expect(within(header('Budget')).getByRole('button', { name: 'Budget' })).toBeInTheDocument();
+    expect(within(header('Department')).queryByRole('button')).not.toBeInTheDocument();
+    expect(header('Name')).toHaveAttribute('aria-sort', 'ascending');
+  });
+
+  it('sorts ascending first and flips the direction on the sorted column', async () => {
+    const onSortChange = vi.fn();
+    const user = userEvent.setup();
+    const { rerender } = renderList({ columns: SORTABLE, sort: 'name', onSortChange, sortChoices: CHOICES });
+
+    await user.click(within(header('Budget')).getByRole('button'));
+    expect(onSortChange).toHaveBeenLastCalledWith('budget_planned');
+    await user.click(within(header('Name')).getByRole('button'));
+    expect(onSortChange).toHaveBeenLastCalledWith('-name');
+    expect(rerender).toBeDefined();
+  });
+
+  it('can be operated from the keyboard', async () => {
+    const onSortChange = vi.fn();
+    const user = userEvent.setup();
+    renderList({ columns: SORTABLE, sort: 'name', onSortChange, sortChoices: CHOICES });
+    within(header('Budget')).getByRole('button').focus();
+    await user.keyboard('{Enter}');
+    expect(onSortChange).toHaveBeenCalledWith('budget_planned');
+  });
+
+  it('has no sort controls when the page gives no handler', () => {
+    renderList({ columns: SORTABLE });
+    expect(within(header('Name')).queryByRole('button')).not.toBeInTheDocument();
+    expect(header('Name')).not.toHaveAttribute('aria-sort');
+  });
+
+  it('offers a Sort select instead on phones', async () => {
+    window.innerWidth = 375;
+    const onSortChange = vi.fn();
+    const user = userEvent.setup();
+    renderList({ columns: SORTABLE, sort: '-name', onSortChange, sortChoices: CHOICES });
+
+    const select = screen.getByRole('combobox', { name: 'Sort' });
+    expect(select).toHaveTextContent('Name, descending');
+    await user.click(select);
+    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual(
+      CHOICES.map((choice) => choice.label),
+    );
+    await user.click(screen.getByRole('option', { name: 'Budget, ascending' }));
+    expect(onSortChange).toHaveBeenCalledWith('budget_planned');
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+  });
+
+  it('shows no Sort select on phones without sort choices, or on desktop', () => {
+    window.innerWidth = 375;
+    const { unmount } = renderList({ columns: SORTABLE });
+    expect(screen.queryByRole('combobox', { name: 'Sort' })).not.toBeInTheDocument();
+    unmount();
+    window.innerWidth = 1024;
+    renderList({ columns: SORTABLE, sort: 'name', onSortChange: vi.fn(), sortChoices: CHOICES });
+    expect(screen.queryByRole('combobox', { name: 'Sort' })).not.toBeInTheDocument();
+  });
+});

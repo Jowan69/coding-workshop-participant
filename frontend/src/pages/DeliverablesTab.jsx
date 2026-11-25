@@ -9,6 +9,7 @@ import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined';
 import AddIcon from '@mui/icons-material/Add';
+import AsOfNote from '../components/AsOfNote';
 import ConfirmDialog from '../components/ConfirmDialog';
 import DataList from '../components/DataList';
 import FilterBar from '../components/FilterBar';
@@ -21,6 +22,7 @@ import { useApiMutation } from '../hooks/useApiMutation';
 import { useClearFilters, useFilterParams } from '../hooks/useFilterParams';
 import { useResourceLookup } from '../hooks/useResourceLookup';
 import { formatDate } from '../utils/format';
+import { expecting } from '../utils/staleness';
 import { DELIVERABLE_STATUS_OPTIONS, statusLabel } from '../utils/status';
 import DependenciesDialog from './DependenciesDialog';
 import { deliverableFields, isDeliverableOverdue } from './deliverableFields';
@@ -28,6 +30,13 @@ import { deliverableFields, isDeliverableOverdue } from './deliverableFields';
 const FILTER_NAMES = ['q', 'status'];
 const FILTER_SPECS = [{ name: 'status', label: 'Status', options: DELIVERABLE_STATUS_OPTIONS }];
 const CLOSED = { open: false, record: null };
+/** The sortable columns (API sort keys); the cells are added in the component. */
+const SORT_COLUMNS = [
+  { key: 'title', label: 'Deliverable', sortKey: 'title' },
+  { key: 'status', label: 'Status', sortKey: 'status' },
+  { key: 'due_date', label: 'Due', sortKey: 'due_date' },
+];
+const LIST_OPTIONS = { columns: SORT_COLUMNS, defaultSort: 'due_date' };
 
 function StatusSelect({ deliverable, disabled, onChange }) {
   return (
@@ -84,8 +93,10 @@ export default function DeliverablesTab({ project, onProjectChange }) {
   const filters = useFilterParams(FILTER_NAMES);
   const clearFilters = useClearFilters(FILTER_NAMES);
   const query = useMemo(() => ({ ...filters, project_id: project.id }), [filters, project.id]);
-  const list = useApiList('/deliverables', query);
-  const { create, update, remove } = useApiMutation('/deliverables', { label: 'Deliverable' });
+  const list = useApiList('/deliverables', query, LIST_OPTIONS);
+  const { create, update, remove, fetchOne } = useApiMutation('/deliverables', {
+    label: 'Deliverable', onStale: list.reload,
+  });
   const people = useResourceLookup();
   const [form, setForm] = useState(CLOSED);
   const [deletion, setDeletion] = useState(CLOSED);
@@ -105,10 +116,17 @@ export default function DeliverablesTab({ project, onProjectChange }) {
 
   const openCreate = () => setForm({ open: true, record: null });
 
-  const handleSave = async (payload) => {
-    if (editing) await update(editing.id, payload);
-    else await create({ ...payload, project_id: project.id });
+  const handleSave = async (payload, context) => {
+    if (editing) await update(editing.id, payload, undefined, context);
+    else await create({ ...payload, project_id: project.id }, undefined, context);
     afterChange();
+  };
+
+  const reloadEditing = async () => {
+    const fresh = await fetchOne(editing.id);
+    setForm({ open: true, record: fresh });
+    list.reload();
+    return fresh;
   };
 
   const handleDelete = async () => {
@@ -122,22 +140,24 @@ export default function DeliverablesTab({ project, onProjectChange }) {
     try {
       await update(
         deliverable.id,
-        { status },
+        expecting(deliverable, { status }),
         `"${deliverable.title}" is now ${statusLabel(status).toLowerCase()}`,
       );
       afterChange();
     } catch {
-      // useApiMutation has shown the reason; the select keeps the saved status.
+      // useApiMutation has shown the reason (with Reload if someone else changed it first);
+      // the select keeps the saved status.
     } finally {
       setStatusSaving(null);
     }
   };
 
   const columns = [
-    { key: 'title', label: 'Deliverable' },
+    { key: 'title', label: 'Deliverable', sortKey: 'title' },
     {
       key: 'status',
       label: 'Status',
+      sortKey: 'status',
       render: (deliverable) => (canWrite ? (
         <StatusSelect
           deliverable={deliverable}
@@ -146,7 +166,12 @@ export default function DeliverablesTab({ project, onProjectChange }) {
         />
       ) : <StatusChip status={deliverable.status} />),
     },
-    { key: 'due_date', label: 'Due', render: (deliverable) => <DueCell deliverable={deliverable} /> },
+    {
+      key: 'due_date',
+      label: 'Due',
+      sortKey: 'due_date',
+      render: (deliverable) => <DueCell deliverable={deliverable} />,
+    },
     {
       key: 'assignee_id',
       label: 'Assignee',
@@ -222,9 +247,13 @@ export default function DeliverablesTab({ project, onProjectChange }) {
         rowsPerPage={list.rowsPerPage}
         onPageChange={list.setPage}
         onRowsPerPageChange={list.setRowsPerPage}
+        sort={list.sort}
+        onSortChange={list.setSort}
+        sortChoices={list.sortChoices}
         rowActions={rowActions}
         emptyState={emptyState}
       />
+      <AsOfNote date={list.items[0]?.as_of} />
       <DependenciesDialog
         key={links.key}
         open={links.open}
@@ -237,6 +266,8 @@ export default function DeliverablesTab({ project, onProjectChange }) {
           title={editing ? `Edit ${editing.title}` : 'New deliverable'}
           fields={fields}
           initialValues={editing ?? undefined}
+          changesOnly={Boolean(editing)}
+          onReload={editing ? reloadEditing : undefined}
           onSubmit={handleSave}
           onClose={() => setForm((current) => ({ ...current, open: false }))}
           submitLabel={editing ? 'Save changes' : 'Add deliverable'}

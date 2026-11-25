@@ -6,6 +6,17 @@ resource "aws_cloudfront_origin_access_control" "this" {
   signing_protocol                  = "sigv4"
 }
 
+# Serves index.html for paths without a file extension, so /projects/5 opens the app
+# (var.enable_spa_rewrite = false if the role cannot create CloudFront Functions)
+resource "aws_cloudfront_function" "spa_rewrite" {
+  count   = data.aws_caller_identity.this.id != "000000000000" && var.enable_spa_rewrite ? 1 : 0
+  name    = format("%s-spa-rewrite-%s", var.aws_project, local.app_id)
+  runtime = "cloudfront-js-2.0"
+  comment = "Rewrite paths without a file extension to /index.html"
+  publish = true
+  code    = file("${path.module}/spa-rewrite.js")
+}
+
 resource "aws_cloudfront_distribution" "this" {
   count               = data.aws_caller_identity.this.id != "000000000000" ? 1 : 0
   enabled             = true
@@ -39,7 +50,8 @@ resource "aws_cloudfront_distribution" "this" {
     }
   }
 
-  # No custom_error_response: it applied to /api/* too, turning API 404s into index.html (frontend uses HashRouter)
+  # No custom_error_response: it applied to /api/* too, turning API 404s into index.html.
+  # Deep links are handled by the viewer-request function on the default behaviour instead.
 
   # logging_config {
   #   include_cookies = false
@@ -56,6 +68,10 @@ resource "aws_cloudfront_distribution" "this" {
       allowed_methods        = ["GET", "HEAD", "OPTIONS", "DELETE", "PATCH", "POST", "PUT"]
       cached_methods         = ["GET", "HEAD"]
       viewer_protocol_policy = "redirect-to-https"
+      compress               = true
+
+      # Managed-SecurityHeadersPolicy: HSTS, nosniff, frame options, referrer policy
+      response_headers_policy_id = "67f7725c-6f97-4210-82d7-5512b31e9d03"
 
       # Use managed cache policy for no caching (ID: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad)
       cache_policy_id = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
@@ -91,6 +107,18 @@ resource "aws_cloudfront_distribution" "this" {
 
     target_origin_id       = local.origin_id
     viewer_protocol_policy = "redirect-to-https"
+    compress               = true
+
+    # Managed-SecurityHeadersPolicy: HSTS, nosniff, frame options, referrer policy
+    response_headers_policy_id = "67f7725c-6f97-4210-82d7-5512b31e9d03"
+
+    dynamic "function_association" {
+      for_each = aws_cloudfront_function.spa_rewrite
+      content {
+        event_type   = "viewer-request"
+        function_arn = function_association.value.arn
+      }
+    }
 
     forwarded_values {
       query_string = false
